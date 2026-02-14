@@ -121,7 +121,7 @@ class Classify:
         cats = " ".join(str(c).lower() for c in categories)
 
         # 1. 头条：来源标记为top 且 不是软内容
-        if ("top" in src or "top" in cats) and not self._is_soft_content(item):
+        if ("top" in src or "top" in cats or "头条" in src or "头条" in cats) and not self._is_soft_content(item):
             return "头条"
 
         # 2. 政治
