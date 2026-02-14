@@ -36,6 +36,7 @@ def run_main_workflow():
                 "summaries": {             # 生成的摘要
                     "low_risk_summary": "...",
                     "high_risk_summary": "...",
+                    "merged_summary": "...",  # 合并后的完整摘要
                     "meta": {...}
                 }
             }
@@ -76,6 +77,17 @@ def run_main_workflow():
     logger.info(f"✓ 完成摘要生成")
     logger.info(f"  - 低风险摘要: {'已生成' if summaries.get('low_risk_summary') else '无'}")
     logger.info(f"  - 高风险摘要: {'已生成' if summaries.get('high_risk_summary') else '无'}")
+    logger.info(f"  - 合并摘要: {'已生成' if summaries.get('merged_summary') else '无'}")
+
+    # 记录fallback信息
+    if summaries.get('meta', {}).get('low_risk_fallback'):
+        logger.warning(f"  ⚠ 低风险摘要触发fallback: {summaries['meta'].get('fallback_reason')}")
+        logger.info(f"    实际使用模型: {summaries['meta'].get('low_risk_model')}")
+        metrics.record_fallback(
+            reason=summaries['meta'].get('fallback_reason', 'unknown'),
+            primary_model="deepseek",
+            fallback_model=summaries['meta'].get('low_risk_model', 'gemini')
+        )
 
     logger.info("\n" + "=" * 60)
     logger.info("工作流执行完成")
