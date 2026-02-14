@@ -89,7 +89,7 @@ class LLMClient:
                     "max_output_tokens": max_tokens,
                 }
             )
-            print(response.text)
+
             return response.text
 
         except Exception as e:
