@@ -5,228 +5,188 @@ class Classify:
     """
     新闻分类器
 
+    流程：过滤 → 分类 → 筛选
     支持5个类别：头条、政治、财经、科技、国际
     """
 
-    # 硬政治关键词
-    POLITICAL_KEYS = [
-        "election", "vote", "parliament", "government", "president", "prime minister",
-        "policy", "sanction", "cabinet", "congress", "senate", "politic",
-        "选举", "政府", "总统", "议会", "内阁", "制裁"
-    ]
-
-    # 财经关键词
-    ECON_KEYS = [
-        "economy", "economic", "market", "stock", "inflation", "bank", "finance", "business",
-        "economia", "borsa", "mercato", "经济", "股市", "通胀", "银行"
-    ]
-
-    # 科技关键词
-    TECH_KEYS = [
-        "tech", "technology", "ai", "artificial intelligence", "software", "chip",
-        "science", "scienza", "科技", "人工智能", "半导体"
-    ]
-
-    # 明确排除的软内容关键词（娱乐、体育等）
-    BLOCK_KEYS = [
-        "sneak peek", "preview", "episode", "season",
-        "super bowl", "nfl", "olympic", "world cup",
-        "beat ", "wins ", "defeats ",
-        "music", "singer", "band", "album", "song",
-        "eagles", "henley",
-        "dog show", "kennel", "show where", "wins gold",
-        "curling", "skating", "athlete",
-        "60 minutes", "48 hours",
-        "face the nation", "sunday morning",
-        "almanac", "passage:",
-        "interview", "transcript",
-        "the takeout", "weekend news",
-    ]
-
     def __init__(self, category):
         """
-        初始化分类器
-
         Args:
-            category: 要提取的类别，可选值：头条、政治、财经、科技、国际
+            category: 要提取的类别（头条/政治/财经/科技/国际）
         """
         self.category = category
 
-    def _is_soft_content(self, item):
+    def _is_excluded(self, item):
         """
-        判断是否是软内容（视频、访谈、文化、生活方式等）
-
-        Args:
-            item: 新闻条目
+        判断是否应该排除（娱乐、体育、节目等非新闻内容）
 
         Returns:
-            bool: True表示是软内容，应该排除
+            bool: True表示应该排除
         """
         title = (item.get("title") or "").lower()
         src = (item.get("origin", {}).get("title") or "").lower()
+        link = (
+            item.get("canonical", [{}])[0].get("href") or
+            item.get("alternate", [{}])[0].get("href") or
+            item.get("link") or ""
+        ).lower()
 
-        # 视频 / 节目 / 文化 / 生活方式
-        soft_keywords = [
-            "video", "transcript", "interview", "sunday morning",
-            "the takeout", "nature", "art", "museum", "culture",
-            "review", "book", "film"
+        # 收集所有文本用于关键词匹配
+        text_parts = [
+            title,
+            item.get("summaryText", ""),
+            item.get("summary", {}).get("content", "") if isinstance(item.get("summary"), dict) else "",
+            str(item.get("summary", "")),
+            link
+        ]
+        full_text = " ".join(str(p) for p in text_parts if p).lower()
+
+        # 排除关键词：娱乐、体育、节目
+        exclude_keywords = [
+            # 节目/预告
+            "sneak peek", "preview", "episode", "season",
+            "interview", "transcript",
+            # 体育
+            "super bowl", "nfl", "olympic", "world cup",
+            "beat ", "wins ", "defeats ", "athlete",
+            "curling", "skating",
+            # 娱乐
+            "music", "singer", "band", "album", "song",
+            "eagles", "henley",
+            # 展览/宠物
+            "dog show", "kennel", "show where", "wins gold",
+            # 电视栏目
+            "60 minutes", "48 hours",
+            "face the nation", "sunday morning",
+            "the takeout", "weekend news",
+            "almanac", "passage:",
+            # 软内容
+            "video", "nature", "art", "museum", "culture",
+            "review", "book", "film", "celebrity", "entertainment"
         ]
 
-        if any(k in title for k in soft_keywords):
+        if any(kw in full_text for kw in exclude_keywords):
             return True
 
-        # BBC 特有软内容
-        if src and "bbc" in src:
-            bbc_soft = ["culture", "future", "travel", "worklife"]
-            if any(k in title for k in bbc_soft):
+        # CBS视频和文字稿
+        if "cbsnews.com/video/" in link or "60-minutes-transcript" in link:
+            return True
+
+        # 美媒节目型标题（日期前缀）
+        if ("cbs" in src or "bbc" in src):
+            if re.match(r"^\d{1,2}/\d{1,2}", title) or re.match(r"^\d{4}:\s", title):
                 return True
 
-        # 美媒 Top Stories 的娱乐 / 生活
-        if src and any(s in src for s in ["cbs", "nbc", "abc"]):
-            us_soft = ["celebrity", "sports", "entertainment"]
-            if any(k in title for k in us_soft):
-                return True
+        # BBC软内容栏目
+        if "bbc" in src and any(kw in title for kw in ["culture", "future", "travel", "worklife"]):
+            return True
 
         return False
 
     def _classify_item(self, item):
         """
-        将单个新闻分类到5个类别之一
+        将新闻分类到5个类别之一
 
-        Args:
-            item: 新闻条目
+        分类优先级：头条 > 政治 > 财经 > 科技 > 国际
 
         Returns:
-            str: 类别名称（头条、政治、财经、科技、国际）
+            str: 类别名称
         """
         title = (item.get("title") or "").lower()
         src = (item.get("origin", {}).get("title") or "").lower()
         categories = item.get("categories", [])
         cats = " ".join(str(c).lower() for c in categories)
 
-        # 1️⃣ 头条（必须是硬新闻）
-        if (("top" in src or "top" in cats) and not self._is_soft_content(item)):
+        # 1. 头条：来源标记为top
+        if "top" in src or "top" in cats:
             return "头条"
 
-        # 2️⃣ 政治
-        if (any(k in title for k in self.POLITICAL_KEYS) or
-            "politica" in src or "politics" in src):
+        # 2. 政治
+        political_keywords = [
+            "election", "vote", "parliament", "government",
+            "president", "prime minister", "policy", "sanction",
+            "cabinet", "congress", "senate", "politic",
+            "选举", "政府", "总统", "议会", "内阁", "制裁"
+        ]
+        if (any(kw in title for kw in political_keywords) or
+            "politics" in src or "politica" in src):
             return "政治"
 
-        # 3️⃣ 财经
-        if (any(k in title for k in self.ECON_KEYS) or
-            "economia" in src or "business" in src):
+        # 3. 财经
+        econ_keywords = [
+            "economy", "economic", "market", "stock",
+            "inflation", "bank", "finance", "business",
+            "economia", "borsa", "mercato",
+            "经济", "股市", "通胀", "银行"
+        ]
+        if (any(kw in title for kw in econ_keywords) or
+            "business" in src or "economia" in src):
             return "财经"
 
-        # 4️⃣ 科技
-        if (any(k in title for k in self.TECH_KEYS) or
-            "scienza" in src or "science" in src or "tech" in src):
+        # 4. 科技
+        tech_keywords = [
+            "tech", "technology", "ai", "artificial intelligence",
+            "software", "chip", "science", "scienza",
+            "科技", "人工智能", "半导体"
+        ]
+        if (any(kw in title for kw in tech_keywords) or
+            "tech" in src or "science" in src or "scienza" in src):
             return "科技"
 
-        # 5️⃣ 国际（兜底）
+        # 5. 国际（兜底）
         return "国际"
 
     def _process_headlines(self, raw_items):
         """
-        处理新闻：过滤、分类、提取指定类别
+        处理新闻：过滤 → 分类 → 筛选
 
         Args:
             raw_items: 原始新闻列表
 
         Returns:
-            dict: 包含section和items的字典
+            dict: {"section": "headline", "items": [...]}
         """
-        PREFIX = "H"
-
-        # ---------- 文本收集 ----------
-        def collect_text(it):
-            parts = [
-                it.get("title"),
-                it.get("summaryText"),
-                it.get("summary", {}).get("content")
-                    if isinstance(it.get("summary"), dict)
-                    else None,
-                it.get("summary") if isinstance(it.get("summary"), str) else None,
-                it.get("link"),
-            ]
-            return " ".join(p for p in parts if p).lower()
-
-        # ---------- 是否屏蔽（硬排除） ----------
-        def is_blocked(item):
-            text = collect_text(item)
-            src = (item.get("origin", {}).get("title") or "").lower()
-
-            link = (
-                item.get("canonical", [{}])[0].get("href")
-                or item.get("alternate", [{}])[0].get("href")
-                or item.get("link")
-                or ""
-            ).lower()
-
-            title = (item.get("title") or "").lower()
-
-            # 关键词
-            if any(k in text for k in self.BLOCK_KEYS):
-                return True
-
-            # CBS transcript
-            if "60-minutes-transcript" in link:
-                return True
-
-            # CBS 视频
-            if "cbsnews.com/video/" in link:
-                return True
-
-            # 美媒节目型标题结构
-            if ("cbs" in src or "bbc" in src):
-                if re.match(r"^\d{1,2}/\d{1,2}", title):
-                    return True
-                if re.match(r"^\d{4}:\s", title):
-                    return True
-
-            return False
-
-        # ---------- 第一步：过滤掉硬排除内容 ----------
-        filtered_items = []
-        for it in raw_items:
-            if not it.get("title"):
-                continue
-            if is_blocked(it):
-                continue
-            filtered_items.append(it)
-
-        # ---------- 第二步：分类并筛选目标类别 ----------
         result = []
-        for it in filtered_items:
-            # 分类
-            item_category = self._classify_item(it)
 
-            # 只保留目标类别
+        for item in raw_items:
+            # 跳过无标题
+            if not item.get("title"):
+                continue
+
+            # 第一步：排除非新闻内容
+            if self._is_excluded(item):
+                continue
+
+            # 第二步：分类
+            item_category = self._classify_item(item)
+
+            # 第三步：筛选目标类别
             if item_category != self.category:
                 continue
 
+            # 提取链接
             link = (
-                it.get("canonical", [{}])[0].get("href")
-                or it.get("alternate", [{}])[0].get("href")
-                or it.get("link")
-                or ""
+                item.get("canonical", [{}])[0].get("href") or
+                item.get("alternate", [{}])[0].get("href") or
+                item.get("link") or ""
             )
 
+            # 提取摘要
+            summary = item.get("summaryText")
+            if not summary:
+                if isinstance(item.get("summary"), dict):
+                    summary = item.get("summary", {}).get("content", "")
+                else:
+                    summary = item.get("summary", "")
+
+            # 构建结果
             result.append({
-                "id": f"{PREFIX}{len(result)+1}",
-                "title": it["title"],
-                "summary": (
-                    it.get("summaryText")
-                    or (it.get("summary") or {}).get("content")
-                    if isinstance(it.get("summary"), dict)
-                    else it.get("summary")
-                    or ""
-                ),
+                "id": f"H{len(result) + 1}",
+                "title": item["title"],
+                "summary": summary or "",
                 "link": link,
-                "source": it.get("origin", {}).get("title")
-                          or it.get("source")
-                          or "",
-                "published": it.get("published"),
+                "source": item.get("origin", {}).get("title") or item.get("source") or "",
+                "published": item.get("published"),
             })
 
         return {
