@@ -17,11 +17,11 @@ class Settings:
     # FreshRSS 配置
     FRESHRSS_URL = os.getenv(
         "FRESHRSS_URL",
-        "http://1Panel-freshrss-WMIb/api/greader.php/reader/api/0/stream/contents/user/-/state/com.google/reading-list"
+        "http://172.18.0.6/api/greader.php/reader/api/0/stream/contents/user/-/state/com.google/reading-list"
     )
     FRESHRSS_AUTH_URL = os.getenv(
         "FRESHRSS_AUTH_URL",
-        "http://1Panel-freshrss-WMIb/api/greader.php/accounts/ClientLogin"
+        "http://172.18.0.6/api/greader.php/accounts/ClientLogin"
     )
     FRESHRSS_EMAIL = os.getenv("FRESHRSS_EMAIL", "")
     FRESHRSS_PASSWORD = os.getenv("FRESHRSS_PASSWORD", "")
@@ -34,10 +34,7 @@ class Settings:
     DEEPSEEK_TOKEN = os.getenv("DEEPSEEK_TOKEN", "")
     DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-    GEMINI_API_URL = os.getenv(
-        "GEMINI_API_URL",
-        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-    )
+    # Gemini 配置（使用 google.genai SDK，不需要 API URL）
     GEMINI_TOKEN = os.getenv("GEMINI_TOKEN", "")
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
 

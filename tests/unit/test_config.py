@@ -15,7 +15,8 @@ def test_settings_instance():
 def test_settings_has_required_attributes():
     """测试配置包含必要的属性"""
     assert hasattr(settings, "DEEPSEEK_API_URL")
-    assert hasattr(settings, "GEMINI_API_URL")
+    assert hasattr(settings, "GEMINI_TOKEN")
+    assert hasattr(settings, "GEMINI_MODEL")
     assert hasattr(settings, "API_TIMEOUT")
     assert hasattr(settings, "DATA_DIR")
     assert hasattr(settings, "LOGS_DIR")
