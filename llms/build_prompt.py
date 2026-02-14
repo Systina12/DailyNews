@@ -121,10 +121,6 @@ def build_ds_risk_prompt(headline_block):
     prompt = RISK_ASSESSMENT_TEMPLATE.format(
         news_items="\n\n".join(news_lines)
     )
-    print({
-        "prompt": prompt,
-        "meta": {"count": len(news)}
-    })
     return {
         "prompt": prompt,
         "meta": {"count": len(news)}
