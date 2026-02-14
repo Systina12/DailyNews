@@ -86,7 +86,6 @@ class LLMClient:
             response = self.gemini_client.models.generate_content(
                 model=settings.GEMINI_MODEL,
                 contents=prompt,
-                config=types.GenerateContentConfig(temperature=temperature),
             )
 
             return response.text
