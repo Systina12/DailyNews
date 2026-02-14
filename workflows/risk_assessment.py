@@ -46,6 +46,7 @@ def run_risk_assessment_pipeline(classified_data):
     # 2. 构建风险评估 prompt
     logger.info("构建风险评估 prompt...")
     prompt_data = build_ds_risk_prompt(classified)
+    print(prompt_data)
 
     if not prompt_data:
         raise ValueError("无法构建风险评估 prompt")
