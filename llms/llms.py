@@ -1,4 +1,5 @@
 import requests
+from google import genai
 from .tokens import get_deepseek_token, get_gemini_token
 from .exceptions import ContentFilteredException
 from utils.deepseek_check import check_deepseek_response
@@ -13,8 +14,11 @@ class LLMClient:
 
     def __init__(self, timeout=None):
         self.deepseek_api_url = settings.DEEPSEEK_API_URL
-        self.gemini_api_url = settings.GEMINI_API_URL
         self.timeout = timeout or settings.API_TIMEOUT
+
+        # 配置 Gemini
+        self.gemini_client = genai.Client(api_key=get_gemini_token())
+
         logger.info(f"LLMClient 初始化完成，超时设置: {self.timeout}秒")
 
     def request_deepseek(self, prompt: str, temperature: float = 0.7, max_tokens: int = 2000) -> str:
@@ -75,38 +79,31 @@ class LLMClient:
         if not prompt:
             raise ValueError("prompt 不能为空")
 
-        headers = {
-            "Authorization": f"Bearer {get_gemini_token()}",
-            "Content-Type": "application/json"
-        }
-
-        data = {
-            "model": "gemini-2.0-flash-exp",#理论上来说模型名写在init好
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": temperature,#翻译可以适当再低一点
-            "max_tokens": max_tokens,
-            "stream": False
-        }
-
         try:
-            response = requests.post(self.gemini_api_url, headers=headers, json=data, timeout=self.timeout)
-            response.raise_for_status()
-            result = response.json()
-            return result["choices"][0]["message"]["content"]
-        except requests.exceptions.Timeout:
-            raise RuntimeError(f"Gemini API 请求超时 (>{self.timeout}秒)")
-        except requests.exceptions.ConnectionError:
-            raise RuntimeError("无法连接到 Gemini API")
-        except requests.exceptions.HTTPError as e:
-            raise RuntimeError(f"Gemini API 请求失败: {e}")
-        except requests.exceptions.JSONDecodeError:
-            raise RuntimeError("Gemini API 返回的数据格式错误")
-        except (KeyError, IndexError) as e:
-            raise RuntimeError(f"Gemini API 返回数据结构异常: {e}")
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Gemini API 请求错误: {e}")
+            # 生成内容
+            response = self.gemini_client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=prompt,
+                config={
+                    "temperature": temperature,
+                    "max_output_tokens": max_tokens,
+                }
+            )
+
+            return response.text
+
+        except Exception as e:
+            error_msg = str(e)
+
+            # 处理常见错误类型
+            if "timeout" in error_msg.lower():
+                raise RuntimeError(f"Gemini API 请求超时 (>{self.timeout}秒)")
+            elif "connection" in error_msg.lower():
+                raise RuntimeError("无法连接到 Gemini API")
+            elif "api key" in error_msg.lower() or "authentication" in error_msg.lower():
+                raise RuntimeError("Gemini API 认证失败，请检查 API Key")
+            else:
+                raise RuntimeError(f"Gemini API 请求错误: {error_msg}")
 
     def request_with_fallback(self, prompt: str, temperature: float = 0.7, max_tokens: int = 2000, primary: str = "deepseek"):
         """
