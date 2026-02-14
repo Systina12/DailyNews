@@ -1,5 +1,7 @@
 import requests
 from google import genai
+from google.genai import types
+
 from .tokens import get_deepseek_token, get_gemini_token
 from .exceptions import ContentFilteredException
 from utils.deepseek_check import check_deepseek_response
@@ -84,10 +86,7 @@ class LLMClient:
             response = self.gemini_client.models.generate_content(
                 model=settings.GEMINI_MODEL,
                 contents=prompt,
-                config={
-                    "temperature": temperature,
-                    "max_output_tokens": max_tokens,
-                }
+                config=types.GenerateContentConfig(temperature=temperature),
             )
 
             return response.text

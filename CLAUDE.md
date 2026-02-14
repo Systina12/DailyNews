@@ -113,9 +113,13 @@ settings.ensure_directories()
 
 **LLMClient** (`llms.py`):
 - `request_deepseek()`: Calls deepseek-chat model with content safety detection
+  - Uses OpenAI-compatible API via requests
   - Automatically detects HTTP 400, empty responses, empty text
   - Throws `ContentFilteredException` when content moderation triggers
 - `request_gemini()`: Calls gemini-2.0-flash-exp model
+  - Uses official `google.genai` SDK (not requests)
+  - Configured with `genai.Client(api_key=...)`
+  - Supports temperature configuration via `types.GenerateContentConfig`
 - `request_with_fallback()`: Smart request with automatic fallback
   - Primary model: DeepSeek or Gemini
   - Auto-switches to backup model if content filtering detected
