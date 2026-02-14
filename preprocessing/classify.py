@@ -5,7 +5,7 @@ class Classify:
     """
     新闻分类器
 
-    流程：过滤 → 分类 → 筛选
+    流程：硬排除 → 分类（头条需额外检查软内容）→ 筛选
     支持5个类别：头条、政治、财经、科技、国际
     """
 
@@ -16,12 +16,12 @@ class Classify:
         """
         self.category = category
 
-    def _is_excluded(self, item):
+    def _is_hard_excluded(self, item):
         """
-        判断是否应该排除（娱乐、体育、节目等非新闻内容）
+        硬排除：娱乐、体育、节目等明确不要的内容
 
         Returns:
-            bool: True表示应该排除
+            bool: True表示应该完全排除
         """
         title = (item.get("title") or "").lower()
         src = (item.get("origin", {}).get("title") or "").lower()
@@ -31,7 +31,7 @@ class Classify:
             item.get("link") or ""
         ).lower()
 
-        # 收集所有文本用于关键词匹配
+        # 收集所有文本
         text_parts = [
             title,
             item.get("summaryText", ""),
@@ -41,11 +41,10 @@ class Classify:
         ]
         full_text = " ".join(str(p) for p in text_parts if p).lower()
 
-        # 排除关键词：娱乐、体育、节目
-        exclude_keywords = [
+        # 硬排除关键词：娱乐、体育、节目
+        hard_exclude = [
             # 节目/预告
             "sneak peek", "preview", "episode", "season",
-            "interview", "transcript",
             # 体育
             "super bowl", "nfl", "olympic", "world cup",
             "beat ", "wins ", "defeats ", "athlete",
@@ -60,12 +59,9 @@ class Classify:
             "face the nation", "sunday morning",
             "the takeout", "weekend news",
             "almanac", "passage:",
-            # 软内容
-            "video", "nature", "art", "museum", "culture",
-            "review", "book", "film", "celebrity", "entertainment"
         ]
 
-        if any(kw in full_text for kw in exclude_keywords):
+        if any(kw in full_text for kw in hard_exclude):
             return True
 
         # CBS视频和文字稿
@@ -77,9 +73,36 @@ class Classify:
             if re.match(r"^\d{1,2}/\d{1,2}", title) or re.match(r"^\d{4}:\s", title):
                 return True
 
+        return False
+
+    def _is_soft_content(self, item):
+        """
+        软内容判断：视频、访谈、文化等（只影响"头条"分类）
+
+        Returns:
+            bool: True表示是软内容
+        """
+        title = (item.get("title") or "").lower()
+        src = (item.get("origin", {}).get("title") or "").lower()
+
+        # 软内容关键词
+        soft_keywords = [
+            "video", "interview", "transcript",
+            "nature", "art", "museum", "culture",
+            "review", "book", "film", "celebrity", "entertainment"
+        ]
+
+        if any(kw in title for kw in soft_keywords):
+            return True
+
         # BBC软内容栏目
         if "bbc" in src and any(kw in title for kw in ["culture", "future", "travel", "worklife"]):
             return True
+
+        # 美媒娱乐/生活
+        if any(s in src for s in ["cbs", "nbc", "abc"]):
+            if any(kw in title for kw in ["celebrity", "sports", "entertainment"]):
+                return True
 
         return False
 
@@ -97,8 +120,8 @@ class Classify:
         categories = item.get("categories", [])
         cats = " ".join(str(c).lower() for c in categories)
 
-        # 1. 头条：来源标记为top
-        if "top" in src or "top" in cats:
+        # 1. 头条：来源标记为top 且 不是软内容
+        if ("top" in src or "top" in cats) and not self._is_soft_content(item):
             return "头条"
 
         # 2. 政治
@@ -138,7 +161,7 @@ class Classify:
 
     def _process_headlines(self, raw_items):
         """
-        处理新闻：过滤 → 分类 → 筛选
+        处理新闻：硬排除 → 分类 → 筛选
 
         Args:
             raw_items: 原始新闻列表
@@ -153,8 +176,8 @@ class Classify:
             if not item.get("title"):
                 continue
 
-            # 第一步：排除非新闻内容
-            if self._is_excluded(item):
+            # 第一步：硬排除（娱乐、体育、节目等）
+            if self._is_hard_excluded(item):
                 continue
 
             # 第二步：分类
