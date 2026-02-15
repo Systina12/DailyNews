@@ -5,6 +5,7 @@
 from llms.build_prompt import build_headline_prompt
 from llms.llms import LLMClient
 from utils.merge_summaries import merge_summaries
+from utils.link_processor import process_summary_links
 from utils.logger import get_logger
 
 logger = get_logger("summary_generation")
@@ -87,7 +88,11 @@ def run_summary_generation_pipeline(risk_annotated_data):
                 primary="deepseek"
             )
 
-            results["low_risk_summary"] = response["content"]
+            # 处理摘要中的引用链接
+            raw_summary = response["content"]
+            processed_summary = process_summary_links(raw_summary, low_prompt_data.get("refs", []))
+
+            results["low_risk_summary"] = processed_summary
             results["meta"]["low_count"] = low_prompt_data["meta"]["filtered"]
             results["meta"]["low_risk_model"] = response["model_used"]
             results["meta"]["low_risk_fallback"] = response["is_fallback"]
