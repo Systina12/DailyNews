@@ -122,7 +122,11 @@ def run_summary_generation_pipeline(risk_annotated_data):
                 temperature=0.3,
                 max_tokens=4000
             )
-            results["high_risk_summary"] = high_summary
+
+            # 处理摘要中的引用链接
+            processed_high_summary = process_summary_links(high_summary, high_prompt_data.get("refs", []))
+
+            results["high_risk_summary"] = processed_high_summary
             results["meta"]["high_count"] = high_prompt_data["meta"]["filtered"]
             logger.info("✓ 完成（使用 gemini）")
         except Exception as e:
