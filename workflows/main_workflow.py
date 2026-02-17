@@ -8,7 +8,7 @@ from datetime import datetime
 
 from config import settings
 from monitoring.metrics import metrics
-from workflows.news_pipeline import run_news_pipeline_all, DEFAULT_CATEGORIES
+from workflows.news_pipeline import run_news_pipeline_all
 from workflows.risk_assessment import run_risk_assessment_pipeline
 from workflows.summary_generation import run_summary_generation_pipeline
 from utils.logger import get_logger
@@ -49,7 +49,9 @@ def run_main_workflow(categories=None):
     settings.ensure_directories()
     settings.validate()
 
-    categories = categories or DEFAULT_CATEGORIES
+    default_categories = ["头条", "政治", "财经", "科技", "国际"]
+    categories = categories or default_categories
+
     logger.info(f"开始主工作流，多分类: {categories}")
 
     # 1) 获取 + 预处理 + 分类（一次拉取，多分类输出）
