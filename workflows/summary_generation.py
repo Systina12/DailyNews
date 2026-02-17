@@ -119,6 +119,7 @@ def run_summary_generation_pipeline(risk_annotated_data):
         low_risk_summary,
         high_risk_summary,
         date=date_str,
+        category=category,
         add_section_headers=True
     )
 

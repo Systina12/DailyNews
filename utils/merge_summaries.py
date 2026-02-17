@@ -72,7 +72,7 @@ def merge_summaries(
     low_risk_summary: Optional[str],
     high_risk_summary: Optional[str],
     date: Optional[str] = None,
-    category="头条",
+    category: Optional[str] = None,
     add_section_headers: bool = True
 ) -> str:
     """
@@ -128,13 +128,13 @@ def merge_summaries(
 
     # 添加低风险新闻段落
     if add_section_headers and low_content["paragraphs"]:
-        html_parts.append("<p><strong>【主要新闻】</strong></p>")
+        html_parts.append("<p><strong>【ds新闻】</strong></p>")
 
     html_parts.extend(f"<p>{p}</p>" for p in low_content["paragraphs"])
 
     # 添加高风险新闻段落
     if add_section_headers and high_paragraphs_renumbered:
-        html_parts.append("<p><strong>【其他新闻】</strong></p>")
+        html_parts.append("<p><strong>【gemini新闻】</strong></p>")
 
     html_parts.extend(f"<p>{p}</p>" for p in high_paragraphs_renumbered)
 
