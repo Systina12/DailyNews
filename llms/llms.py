@@ -23,7 +23,7 @@ class LLMClient:
 
         logger.info(f"LLMClient 初始化完成，超时设置: {self.timeout}秒")
 
-    def request_deepseek(self, prompt: str, temperature: float = 0.7, max_tokens: int = 2000) -> str:
+    def request_deepseek(self, prompt: str, temperature: float = 0.7) -> str:
         if not prompt:
             raise ValueError("prompt 不能为空")
 
@@ -77,7 +77,7 @@ class LLMClient:
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"DeepSeek API 请求错误: {e}")
 
-    def request_gemini(self, prompt: str, temperature: float = 0.7, max_tokens: int = 2000) -> str:
+    def request_gemini(self, prompt: str, temperature: float = 0.7) -> str:
         if not prompt:
             raise ValueError("prompt 不能为空")
 
