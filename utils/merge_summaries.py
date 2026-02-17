@@ -72,6 +72,7 @@ def merge_summaries(
     low_risk_summary: Optional[str],
     high_risk_summary: Optional[str],
     date: Optional[str] = None,
+    category="头条",
     add_section_headers: bool = True
 ) -> str:
     """
@@ -123,7 +124,7 @@ def merge_summaries(
     logger.info(f"引用编号偏移量: {offset}")
 
     # 构建合并后的HTML
-    html_parts = [f"<h1>{date} 头条</h1>"]
+    html_parts = [f"<h1>{date} {category}</h1>"]
 
     # 添加低风险新闻段落
     if add_section_headers and low_content["paragraphs"]:
