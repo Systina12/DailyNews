@@ -26,7 +26,7 @@ class Settings:
     FRESHRSS_EMAIL = os.getenv("FRESHRSS_EMAIL", "")
     FRESHRSS_PASSWORD = os.getenv("FRESHRSS_PASSWORD", "")
 
-    # LLM API 配置
+    # deepseek API 配置
     DEEPSEEK_API_URL = os.getenv(
         "DEEPSEEK_API_URL",
         "https://api.deepseek.com/v1/chat/completions"

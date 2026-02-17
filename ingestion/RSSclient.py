@@ -63,7 +63,7 @@ class RSSClient:
 
         params = {
             "output": "json",
-            "n": 1000,
+            "n": 999999999999999,
             "ot": timestamp,
         }
 
