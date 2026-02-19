@@ -57,6 +57,16 @@ class Settings:
     DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", "0.3"))
     DEFAULT_MAX_TOKENS = int(os.getenv("DEFAULT_MAX_TOKENS", "4000"))
 
+    #SMTP配置
+    SMTP_HOST = "SMTP_HOST",
+    SMTP_PORT = "SMTP_PORT","587"
+    SMTP_USERNAME = "SMTP_USERNAME"
+    SMTP_PASSWORD = "SMTP_PASSWORD"
+    SMTP_USE_TLS = True
+    SMTP_USE_SSL = False
+    SMTP_FROM = "SMTP_FROM"
+    SMTP_TO ="SMTP_TO"
+
     @classmethod
     def ensure_directories(cls):
         """确保必要的目录存在"""

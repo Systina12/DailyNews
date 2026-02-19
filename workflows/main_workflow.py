@@ -111,6 +111,11 @@ def run_main_workflow(categories=None):
             "meta": meta
         })
 
+        # ✅ 发送邮件：发的就是第四步生成的 merged_summary
+        subject = f"{date_str} {category} 新闻摘要"
+        send_html_email(subject=subject, html_body=merged_summary)
+        logger.info(f"分类 [{category}] 邮件已发送")
+
     # 5) 打印指标摘要
     metrics.print_summary()
 
