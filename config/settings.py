@@ -57,15 +57,15 @@ class Settings:
     DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", "0.3"))
     DEFAULT_MAX_TOKENS = int(os.getenv("DEFAULT_MAX_TOKENS", "4000"))
 
-    #SMTP配置
-    SMTP_HOST = "SMTP_HOST"
-    SMTP_PORT = "SMTP_PORT","587"
-    SMTP_USERNAME = "SMTP_USERNAME"
-    SMTP_PASSWORD = "SMTP_PASSWORD"
-    SMTP_USE_TLS = True
-    SMTP_USE_SSL = False
-    SMTP_FROM = "SMTP_FROM", ""
-    SMTP_TO ="SMTP_TO", ""
+    # SMTP配置（从环境变量读取）
+    SMTP_HOST = os.getenv("SMTP_HOST", "")
+    SMTP_PORT = os.getenv("SMTP_PORT", "587")  # 先保留为字符串，使用时再 int()
+    SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+    SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
+    SMTP_FROM = os.getenv("SMTP_FROM", "")
+    SMTP_TO = os.getenv("SMTP_TO", "")  # 多个收件人用逗号分隔
 
     @classmethod
     def ensure_directories(cls):
