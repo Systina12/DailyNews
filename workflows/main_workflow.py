@@ -11,6 +11,7 @@ from monitoring.metrics import metrics
 from workflows.news_pipeline import run_news_pipeline_all
 from workflows.risk_assessment import run_risk_assessment_pipeline
 from workflows.summary_generation import run_summary_generation_pipeline
+from utils.email_sender import send_html_email
 from utils.logger import get_logger
 
 logger = get_logger("main_workflow")
