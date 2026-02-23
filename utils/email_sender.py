@@ -1,5 +1,6 @@
 # utils/email_sender.py
 import smtplib
+from email.header import Header
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from utils.logger import get_logger
@@ -31,8 +32,7 @@ def send_html_email(subject: str, html_body: str):
     password = getattr(settings, "SMTP_PASSWORD", "")
     mail_from = getattr(settings, "SMTP_FROM", "")
     mail_to = _parse_recipients(getattr(settings, "SMTP_TO", ""))
-    use_tls = str(getattr(settings, "SMTP_USE_TLS", "false")).lower() == "true"
-    use_ssl = str(getattr(settings, "SMTP_USE_SSL", "false")).lower() == "true"
+
 
     if not host or not port:
         raise ValueError("SMTP_HOST/SMTP_PORT 未配置")
@@ -40,7 +40,7 @@ def send_html_email(subject: str, html_body: str):
         raise ValueError("SMTP_FROM/SMTP_TO 未配置")
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
+    msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = mail_from
     msg["To"] = ", ".join(mail_to)
 
@@ -48,25 +48,17 @@ def send_html_email(subject: str, html_body: str):
 
     logger.info(f"准备发送邮件: host={host}, port={port}, to={len(mail_to)}")
 
-    if use_ssl:
-        server = smtplib.SMTP_SSL(host, port, timeout=settings.API_TIMEOUT)
-    else:
-        server = smtplib.SMTP(host, port, timeout=settings.API_TIMEOUT)
-
+    server = None
     try:
+        server = smtplib.SMTP_SSL(host, port, timeout=settings.API_TIMEOUT)
         server.ehlo()
-        if use_tls and not use_ssl:
-            server.starttls()
-            server.ehlo()
-
-        # 如果提供了用户名就尝试登录（某些自建 SMTP 可匿名发送）
         if username:
             server.login(username, password)
-
-        server.sendmail(mail_from, mail_to, msg.as_string())
+        server.send_message(msg)
         logger.info("邮件发送成功")
     finally:
-        try:
-            server.quit()
-        except Exception:
-            pass
+        if server:
+            try:
+                server.quit()
+            except Exception:
+                pass
