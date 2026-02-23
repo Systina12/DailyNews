@@ -51,7 +51,6 @@ def send_html_email(subject: str, html_body: str):
     server = None
     try:
         server = smtplib.SMTP_SSL(host, port, timeout=settings.API_TIMEOUT)
-        server.ehlo()
         if username:
             server.login(username, password)
         server.send_message(msg)

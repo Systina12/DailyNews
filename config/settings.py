@@ -59,7 +59,7 @@ class Settings:
 
     # SMTP配置（从环境变量读取）
     SMTP_HOST = os.getenv("SMTP_HOST", "")
-    SMTP_PORT = os.getenv("SMTP_PORT", "587")  # 先保留为字符串，使用时再 int()
+    SMTP_PORT = os.getenv("SMTP_PORT", "465")  # 先保留为字符串，使用时再 int()
     SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
     SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
