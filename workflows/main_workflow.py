@@ -1,9 +1,7 @@
-"""
-主工作流入口：新闻处理 -> 风险评估 -> 摘要生成 -> 写入文件
-（目标1：支持多分类）
-"""
+"""主工作流入口：新闻处理 -> 风险评估 -> 摘要生成 -> 写入文件（支持多分类 + hours 参数）"""
 
 import os
+import argparse
 from datetime import datetime
 
 from config import settings
@@ -18,9 +16,7 @@ logger = get_logger("main_workflow")
 
 
 def _safe_filename(s: str) -> str:
-    """
-    简单的文件名清洗：把空格/斜杠等替换掉，避免写文件失败
-    """
+    """简单的文件名清洗：把空格/斜杠等替换掉，避免写文件失败"""
     if not s:
         return "unknown"
     bad = ['/', '\\', ':', '*', '?', '"', '<', '>', '|', ' ']
@@ -30,34 +26,25 @@ def _safe_filename(s: str) -> str:
     return out
 
 
-def run_main_workflow(categories=None):
+def run_main_workflow(categories=None, hours: int = 24):
     """
     运行主工作流（多分类）
 
     Args:
-        categories: 分类列表，默认 ["头条","政治","财经","科技","国际"]
-
-    Returns:
-        dict: 每个分类的结果汇总：
-            {
-              "results": [
-                 {"category": "...", "output_path": "...", "meta": {...}},
-                 ...
-              ],
-              "meta": {"generated_at": "...", "categories": [...]}
-            }
+      categories: 分类列表，默认 ["头条","政治","财经","科技"]
+      hours: 拉取最近多少小时的新闻（默认 24）
     """
     settings.ensure_directories()
     settings.validate()
 
-    default_categories = ["头条", "政治", "财经", "科技"] #, "国际"]
+    default_categories = ["头条", "政治", "财经", "科技"]  # , "国际"
     categories = categories or default_categories
 
-    logger.info(f"开始主工作流，多分类: {categories}")
+    logger.info(f"开始主工作流，多分类: {categories}，hours={hours}")
 
     # 1) 获取 + 预处理 + 分类（一次拉取，多分类输出）
     logger.info("运行新闻预处理与分类...")
-    blocks = run_news_pipeline_all(categories=categories)
+    blocks = run_news_pipeline_all(categories=categories, hours=hours)
 
     results = []
     for block in blocks:
@@ -75,7 +62,6 @@ def run_main_workflow(categories=None):
         # 2) 风险评估（Gemini）
         logger.info(f"分类 [{category}] 进行风险评估...")
         risk_data = run_risk_assessment_pipeline(block)
-
         low_count = sum(1 for it in risk_data.get("items", []) if it.get("ds_risk") == "low")
         high_count = sum(1 for it in risk_data.get("items", []) if it.get("ds_risk") == "high")
         metrics.record_risk_assessment(total=len(risk_data.get("items", [])), low=low_count, high=high_count)
@@ -83,7 +69,6 @@ def run_main_workflow(categories=None):
         # 3) 摘要生成（低风险 DeepSeek+fallback，高风险 Gemini）
         logger.info(f"分类 [{category}] 生成摘要...")
         summaries = run_summary_generation_pipeline(risk_data)
-
         merged_summary = summaries.get("merged_summary", "") or ""
         meta = summaries.get("meta", {}) or {}
 
@@ -92,7 +77,7 @@ def run_main_workflow(categories=None):
             metrics.record_fallback(
                 reason=meta.get("low_filter_reason") or "content_filtered",
                 primary_model="deepseek",
-                fallback_model="gemini"
+                fallback_model="gemini",
             )
 
         # 4) 写入文件：每类一个 merged html
@@ -109,11 +94,11 @@ def run_main_workflow(categories=None):
         results.append({
             "category": category,
             "output_path": out_path,
-            "meta": meta
+            "meta": meta,
         })
 
         # ✅ 发送邮件：发的就是第四步生成的 merged_summary
-        subject = f"{date_str} {category} 新闻摘要"
+        subject = f"{date_str} {category} 新闻摘要（近{int(hours)}小时）"
         send_html_email(subject=subject, html_body=merged_summary)
         logger.info(f"分类 [{category}] 邮件已发送")
 
@@ -124,10 +109,30 @@ def run_main_workflow(categories=None):
         "results": results,
         "meta": {
             "generated_at": datetime.now().isoformat(),
-            "categories": categories
-        }
+            "categories": categories,
+            "hours": int(hours),
+        },
     }
 
 
+def _parse_args():
+    p = argparse.ArgumentParser(description="DailyNews 主工作流（多分类）")
+    p.add_argument(
+        "--hours",
+        type=int,
+        default=24,
+        help="拉取最近多少小时的新闻（默认 24）",
+    )
+    p.add_argument(
+        "--categories",
+        type=str,
+        default="",
+        help='分类列表，逗号分隔，例如： "头条,政治,财经,科技"；不传则用默认分类',
+    )
+    return p.parse_args()
+
+
 if __name__ == "__main__":
-    run_main_workflow()
+    args = _parse_args()
+    cats = [x.strip() for x in (args.categories or "").split(",") if x.strip()] or None
+    run_main_workflow(categories=cats, hours=args.hours)
