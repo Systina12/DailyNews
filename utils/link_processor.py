@@ -1,29 +1,32 @@
-"""
-摘要链接后处理工具
+# utils/link_processor.py
+"""摘要链接后处理工具
+
+将 LLM 生成的引用标记 [N] 替换为真实新闻链接，并把链接移动到紧邻标点之后：
+例如：'……[1]。' -> '……。<a ...>[1]</a>'
 """
 
+from __future__ import annotations
+
 import re
+from typing import Any
+
 from utils.logger import get_logger
 
 logger = get_logger("link_processor")
 
 
-def process_summary_links(summary_html, refs):
-    """
-    处理摘要中的引用链接，将 #refN 替换为实际的新闻链接
+# 需要把链接放到这些标点后面（中英文常见结尾标点）
+_PUNCT = "。！？；,.!?;"
+
+
+def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
+    """处理摘要中的引用链接，将 [N] 替换为实际的新闻链接，并把链接挪到结尾标点后面。
 
     Args:
-        summary_html: LLM 生成的 HTML 摘要，包含 <a href="#refN">[N]</a> 格式的引用
+        summary_html: LLM 生成的 HTML/Markdown 摘要，包含 [N] 格式引用
         refs: 引用列表，格式 [{"n": 1, "title": "...", "url": "..."}, ...]
-
     Returns:
-        str: 处理后的 HTML 摘要，引用链接已替换为实际 URL
-
-    Example:
-        >>> refs = [{"n": 1, "title": "News", "url": "https://example.com"}]
-        >>> html = '<p>Some text <a href="#ref1">[1]</a></p>'
-        >>> process_summary_links(html, refs)
-        '<p>Some text <a href="https://example.com" target="_blank">[1]</a></p>'
+        str: 处理后的摘要
     """
     if not summary_html:
         return summary_html
@@ -32,43 +35,53 @@ def process_summary_links(summary_html, refs):
         logger.warning("没有提供引用数据，跳过链接处理")
         return summary_html
 
-    # 创建编号到URL的映射
-    ref_map = {ref["n"]: ref["url"] for ref in refs if ref.get("url")}
+    # 创建编号到 URL 的映射
+    ref_map = {}
+    for ref in refs:
+        try:
+            n = ref.get("n")
+            url = ref.get("url")
+            if isinstance(n, int) and url:
+                ref_map[n] = str(url)
+        except Exception:
+            continue
 
     if not ref_map:
         logger.warning("引用列表中没有有效的URL")
         return summary_html
 
-    # 替换 <a href="#refN">[N]</a> 为实际链接
-    def replace_ref(match):
+    # 1) 替换 [N] 为 <a href="...">[N]</a>
+    def _replace_bracket_ref(match: re.Match) -> str:
         n_str = match.group(1)
-        bracket_n_str = match.group(2)
+        try:
+            n = int(n_str)
+        except ValueError:
+            return match.group(0)
 
-        # 验证两个数字是否一致
-        if n_str != bracket_n_str:
-            logger.warning(f"引用标记不一致: href中为{n_str}，括号中为{bracket_n_str}")
-
-        n = int(n_str)
         url = ref_map.get(n)
-
         if not url:
             logger.warning(f"未找到编号 {n} 对应的URL，保持原引用格式")
-            return match.group(0)  # 保持原样
+            return match.group(0)
 
-        return f'<a href="{url}" target="_blank">[{n}]</a>'
+        # title 可选：不强依赖，避免引号/特殊字符破坏 HTML
+        return (
+            f'<a class="news-ref" href="{url}" target="_blank" '
+            f'rel="noopener noreferrer">[{n}]</a>'
+        )
 
-    # 匹配 <a href="#refN">[N]</a> 格式
-    # 捕获组1: href中的数字，捕获组2: 括号中的数字
+    processed = re.sub(r"\[(\d+)\]", _replace_bracket_ref, summary_html)
+
+    # 2) 如果链接后面紧跟结尾标点，把链接移动到标点后面
+    #    '...<a ...>[1]</a>。' -> '...。<a ...>[1]</a>'
     processed = re.sub(
-        r'<a href="#ref(\d+)">\[(\d+)\]</a>',
-        replace_ref,
-        summary_html
+        rf'(<a class="news-ref"[^>]*>\[\d+\]</a>)([{re.escape(_PUNCT)}])',
+        r"\2\1",
+        processed,
     )
 
-    # 统计替换次数
-    original_refs = len(re.findall(r'<a href="#ref\d+">\[\d+\]</a>', summary_html))
-    processed_refs = len(re.findall(r'<a href="[^#][^"]*" target="_blank">\[\d+\]</a>', processed))
-
-    logger.info(f"链接处理完成: 原始引用 {original_refs} 个，成功替换 {processed_refs} 个")
+    # 统计替换次数（粗略）
+    original_refs = len(re.findall(r"\[\d+\]", summary_html))
+    replaced_refs = len(re.findall(r'<a class="news-ref"[^>]*>\[\d+\]</a>', processed))
+    logger.info(f"链接处理完成: 原始引用 {original_refs} 个，成功替换 {replaced_refs} 个")
 
     return processed
