@@ -63,15 +63,16 @@ def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
             logger.warning(f"未找到编号 {n} 对应的URL，保持原引用格式")
             return match.group(0)
 
-        # title 可选：不强依赖，避免引号/特殊字符破坏 HTML
+        # 生成超链接 <a href="...">[N]</a>
         return (
             f'<a class="news-ref" href="{url}" target="_blank" '
             f'rel="noopener noreferrer">[{n}]</a>'
         )
 
+    # 处理替换，去掉嵌套的链接
     processed = re.sub(r"\[(\d+)\]", _replace_bracket_ref, summary_html)
 
-    # 2) 如果链接后面紧跟结尾标点，把链接移动到标点后面
+    # 2) 确保链接出现在标点符号后面
     #    '...<a ...>[1]</a>。' -> '...。<a ...>[1]</a>'
     processed = re.sub(
         rf'(<a class="news-ref"[^>]*>\[\d+\]</a>)([{re.escape(_PUNCT)}])',
