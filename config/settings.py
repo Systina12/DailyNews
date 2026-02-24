@@ -65,6 +65,7 @@ class Settings:
     SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
     SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
     SMTP_FROM = os.getenv("SMTP_FROM", "")
+    #woshishabi
     SMTP_TO = os.getenv("SMTP_TO", "")  # 多个收件人用逗号分隔
 
     @classmethod
