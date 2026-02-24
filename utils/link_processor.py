@@ -16,7 +16,7 @@ logger = get_logger("link_processor")
 
 
 # 需要把链接放到这些标点后面（中英文常见结尾标点）
-_PUNCT = "。！？；,.!?;"
+_PUNCT = "。！？；,.!?;“”'()"
 
 
 def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
