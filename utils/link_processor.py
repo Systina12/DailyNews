@@ -1,8 +1,7 @@
 # utils/link_processor.py
 """摘要链接后处理工具
 
-将 LLM 生成的引用标记 [N] 替换为真实新闻链接，并把链接移动到新闻最后一个标点后面：
-例如：'... [1]。' -> '... [1]</a>。'
+将 LLM 生成的引用标记 [N] 替换为真实新闻链接，并把链接移动到句号前面。
 """
 
 from __future__ import annotations
@@ -15,12 +14,12 @@ from utils.logger import get_logger
 logger = get_logger("link_processor")
 
 
-# 需要把链接放到这些标点后面（中英文常见结尾标点）
+# 需要把链接放到这些标点前面（中英文常见结尾标点）
 _PUNCT = "。！？；,.!?;“”'()"
 
 
 def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
-    """处理摘要中的引用链接，将 [N] 替换为实际的新闻链接，并把链接挪到结尾标点后面。
+    """处理摘要中的引用链接，将 [N] 替换为实际的新闻链接，并把链接挪到结尾标点前面。
 
     Args:
         summary_html: LLM 生成的 HTML/Markdown 摘要，包含 [N] 格式引用
@@ -72,19 +71,14 @@ def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
     # 处理替换，去掉嵌套的链接
     processed = re.sub(r"\[(\d+)\]", _replace_bracket_ref, summary_html)
 
-    # 2) 确保链接出现在每段新闻的最后一个标点符号后面
-    # 只把超链接添加到最后一个句号后面，避免每个句号前面都挂上链接
+    # 2) 确保链接出现在每个句号前面
     processed = re.sub(
         rf'(<a class="news-ref"[^>]*>\[\d+\]</a>)([{re.escape(_PUNCT)}])',
-        r"\2\1",  # 保证标点符号在链接前
+        r"\1\2",  # 保证链接在标点符号前
         processed,
     )
 
-    # 3) 确保链接只添加到最后一个句号（或其他标点符号）后
-    processed = re.sub(r'([^.]*\[[0-9]+\].*?)(?=\s*([。！？;,.!?]))',
-                      r'\1</a>\2', processed)
-
-    # 4) 修复额外句号问题：防止重复句号出现
+    # 3) 修复额外句号问题：防止重复句号出现
     processed = re.sub(r'([。！？；,.!?;])(<a[^>]*>)', r'\2\1', processed)
 
     # 统计替换次数（粗略）
