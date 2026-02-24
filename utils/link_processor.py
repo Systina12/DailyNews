@@ -1,31 +1,28 @@
 # utils/link_processor.py
-"""摘要链接后处理工具
-
-将 LLM 生成的引用标记 [N] 替换为真实新闻链接，并把链接移动到句号前面。
+"""摘要链接处理工具：
+把 LLM 生成的引用标记 [N] 替换为真实新闻链接，
+并确保每条新闻段落只在最后一个标点之前挂上一个链接。
 """
 
 from __future__ import annotations
-
 import re
 from typing import Any
-
 from utils.logger import get_logger
 
 logger = get_logger("link_processor")
 
+# 认为这些标点是结尾标点
+_PUNCT = "。！？；,.!?;"
 
-# 需要把链接放到这些标点前面（中英文常见结尾标点）
-_PUNCT = "。！？；,.!?;“”'()"
-
-
-def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
-    """处理摘要中的引用链接，将 [N] 替换为实际的新闻链接，并把链接挪到结尾标点前面。
+def process_summary_links(summary_html: str, refs: list[dict[str, Any]]) -> str:
+    """处理摘要中的引用链接，将 [N] 替换为实际的新闻链接，并把链接挪到段落最后一个标点前。
 
     Args:
-        summary_html: LLM 生成的 HTML/Markdown 摘要，包含 [N] 格式引用
-        refs: 引用列表，格式 [{"n": 1, "title": "...", "url": "..."}, ...]
+        summary_html: LLM 生成的 HTML 摘要（可能包含 [1] [2] … 格式引用）
+        refs: 引用列表，格式 [{"n": 1, "title": "...", "url": "..."}, …]
+
     Returns:
-        str: 处理后的摘要
+        str: 处理后的 HTML
     """
     if not summary_html:
         return summary_html
@@ -34,56 +31,72 @@ def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
         logger.warning("没有提供引用数据，跳过链接处理")
         return summary_html
 
-    # 创建编号到 URL 的映射
-    ref_map = {}
+    # 1) 构建编号到 URL 的映射
+    ref_map: dict[int, str] = {}
     for ref in refs:
         try:
             n = ref.get("n")
             url = ref.get("url")
-            if isinstance(n, int) and url:
-                ref_map[n] = str(url)
+            if isinstance(n, int) and isinstance(url, str) and url:
+                ref_map[n] = url
         except Exception:
             continue
 
     if not ref_map:
-        logger.warning("引用列表中没有有效的URL")
+        logger.warning("引用列表中没有有效的 URL")
         return summary_html
 
-    # 1) 替换 [N] 为 <a href="...">[N]</a>
-    def _replace_bracket_ref(match: re.Match) -> str:
-        n_str = match.group(1)
-        try:
-            n = int(n_str)
-        except ValueError:
-            return match.group(0)
-
+    # 2) 把 [N] 替换成标准 HTML 链接 <a href="…">[N]</a>
+    def _to_html_link(m: re.Match) -> str:
+        n = int(m.group(1))
         url = ref_map.get(n)
         if not url:
-            logger.warning(f"未找到编号 {n} 对应的URL，保持原引用格式")
-            return match.group(0)
+            return m.group(0)  # 找不到 URL，保持原样
+        # target="_blank" 可选，不影响布局
+        return f'<a href="{url}" target="_blank">[{n}]</a>'
 
-        # 生成超链接 <a href="...">[N]</a>
-        return (
-            f'<a class="news-ref" href="{url}" target="_blank" '
-            f'rel="noopener noreferrer">[{n}]</a>'
-        )
+    # 先转换所有 [N]
+    converted = re.sub(r"\[(\d+)\]", _to_html_link, summary_html)
 
-    # 处理替换，去掉嵌套的链接
-    processed = re.sub(r"\[(\d+)\]", _replace_bracket_ref, summary_html)
+    # 3) 分段处理：按 <p>…</p> 或按换行两次分块
+    # 优先按 <p> 标签分开
+    parts = re.split(r'(<p[^>]*>.*?</p>)', converted, flags=re.DOTALL)
+    output = []
 
-    # 2) 确保链接出现在每个句号前面
-    processed = re.sub(
-        rf'(<a class="news-ref"[^>]*>\[\d+\]</a>)([{re.escape(_PUNCT)}])',
-        r"\1\2",  # 保证链接在标点符号前
-        processed,
-    )
+    for part in parts:
+        # 这个片段里找所有 HTML 链接
+        links = list(re.finditer(r'<a\s+href="[^"]+"\s*target="_blank">.*?</a>', part, flags=re.DOTALL))
+        if len(links) <= 1:
+            # 0 或 1 个链接直接保留
+            output.append(part)
+            continue
 
-    # 3) 修复额外句号问题：防止重复句号出现
-    processed = re.sub(r'([。！？；,.!?;])(<a[^>]*>)', r'\2\1', processed)
+        # 取最后一个链接
+        last_link_html = links[-1].group(0)
 
-    # 统计替换次数（粗略）
-    original_refs = len(re.findall(r"\[\d+\]", summary_html))
-    replaced_refs = len(re.findall(r'<a class="news-ref"[^>]*>\[\d+\]</a>', processed))
-    logger.info(f"链接处理完成: 原始引用 {original_refs} 个，成功替换 {replaced_refs} 个")
+        # 删除所有链接（保留内部文字）
+        def strip_link(m: re.Match) -> str:
+            inner = re.sub(r'<a\s+href="[^"]+"\s*target="_blank">(.*?)</a>', r"\1", m.group(0), flags=re.DOTALL)
+            return inner
 
-    return processed
+        text_without_links = re.sub(r'<a\s+href="[^"]+"\s*target="_blank">.*?</a>', strip_link, part, flags=re.DOTALL)
+
+        # 找到最后一句结尾标点
+        m_end = re.search(rf'([{re.escape(_PUNCT)}])(?=[^{re.escape(_PUNCT)}]*$)', text_without_links)
+        if m_end:
+            idx = m_end.end()
+            new_part = text_without_links[:idx] + last_link_html + text_without_links[idx:]
+        else:
+            # 没找到标点，就放到整段末尾
+            new_part = text_without_links + last_link_html
+
+        output.append(new_part)
+
+    result_html = "".join(output)
+
+    # 统计信息
+    total_refs = len(re.findall(r"\[\d+\]", summary_html))
+    kept_links = len(re.findall(r'<a\s+href=', result_html))
+    logger.info(f"链接处理完成: 原始引用 {total_refs} 个，最终链接 {kept_links} 个")
+
+    return result_html
