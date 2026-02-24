@@ -40,6 +40,8 @@ def run_main_workflow(categories=None, hours: int = 24):
     default_categories = ["头条", "政治", "财经", "科技"]  # , "国际"
     categories = categories or default_categories
 
+    run_ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
     logger.info(f"开始主工作流，多分类: {categories}，hours={hours}")
 
     # 1) 获取 + 预处理 + 分类（一次拉取，多分类输出）
@@ -80,22 +82,26 @@ def run_main_workflow(categories=None, hours: int = 24):
                 fallback_model="gemini",
             )
 
-        # 4) 写入文件：每类一个 merged html
+        # 4) 写入文件：每类一个 merged html（文件名精确到秒）
         date_str = meta.get("dateStr") or datetime.now().strftime("%Y-%m-%d")
         safe_cat = _safe_filename(category)
-        filename = f"summary_{safe_cat}_{date_str}.html"
+
+        # 旧：summary_{safe_cat}_{date_str}.html
+        # 新：summary_{safe_cat}_{date_str}_{run_ts}.html（精确到秒）
+        filename = f"summary_{safe_cat}_{date_str}_{run_ts}.html"
         out_path = os.path.join(str(settings.DATA_DIR), filename)
 
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(merged_summary)
 
         logger.info(f"分类 [{category}] 输出文件: {out_path}")
-
-        results.append({
-            "category": category,
-            "output_path": out_path,
-            "meta": meta,
-        })
+        results.append(
+            {
+                "category": category,
+                "output_path": out_path,
+                "meta": meta,
+            }
+        )
 
         # ✅ 发送邮件：发的就是第四步生成的 merged_summary
         subject = f"{date_str} {category} 新闻摘要（近{int(hours)}小时）"
