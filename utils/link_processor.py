@@ -1,8 +1,8 @@
 # utils/link_processor.py
 """摘要链接后处理工具
 
-将 LLM 生成的引用标记 [N] 替换为真实新闻链接，并把链接移动到紧邻标点之后：
-例如：'……[1]。' -> '……。<a ...>[1]</a>'
+将 LLM 生成的引用标记 [N] 替换为真实新闻链接，并把链接移动到新闻最后一个标点后面：
+例如：'... [1]。' -> '... [1]</a>。'
 """
 
 from __future__ import annotations
@@ -72,13 +72,17 @@ def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
     # 处理替换，去掉嵌套的链接
     processed = re.sub(r"\[(\d+)\]", _replace_bracket_ref, summary_html)
 
-    # 2) 确保链接出现在标点符号后面
-    #    '...<a ...>[1]</a>。' -> '...。<a ...>[1]</a>'
+    # 2) 确保链接出现在每段新闻的最后一个标点符号后面
+    # 只把超链接添加到最后一个句号后面，避免每个句号前面都挂上链接
     processed = re.sub(
         rf'(<a class="news-ref"[^>]*>\[\d+\]</a>)([{re.escape(_PUNCT)}])',
         r"\2\1",
         processed,
     )
+
+    # 确保只在最后一个标点符号后插入链接
+    processed = re.sub(r'([^.]*\[[0-9]+\].*?)(?=\s*([。！？;,.!?]))',
+                      r'\1</a>\2', processed)
 
     # 统计替换次数（粗略）
     original_refs = len(re.findall(r"\[\d+\]", summary_html))
