@@ -1,5 +1,6 @@
-"""主工作流入口：新闻处理 -> 风险评估 -> 摘要生成 -> 写入文件（支持多分类 + hours 参数）"""
-
+"""
+主工作流入口：新闻处理 -> 风险评估 -> 摘要生成 -> 写入文件（支持多分类 + hours 参数）
+"""
 import os
 import argparse
 from datetime import datetime
@@ -29,10 +30,9 @@ def _safe_filename(s: str) -> str:
 def run_main_workflow(categories=None, hours: int = 24):
     """
     运行主工作流（多分类）
-
     Args:
-      categories: 分类列表，默认 ["头条","政治","财经","科技"]
-      hours: 拉取最近多少小时的新闻（默认 24）
+        categories: 分类列表，默认 ["头条","政治","财经","科技"]
+        hours: 拉取最近多少小时的新闻（默认 24）
     """
     settings.ensure_directories()
     settings.validate()
@@ -40,7 +40,10 @@ def run_main_workflow(categories=None, hours: int = 24):
     default_categories = ["头条", "政治", "财经", "科技"]  # , "国际"
     categories = categories or default_categories
 
+    # 用“精确到秒”的时间戳做本次运行的输出文件后缀
     run_ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    # 邮件标题只用“小时”
+    hour_cn = f"{datetime.now().strftime('%H')}点"
 
     logger.info(f"开始主工作流，多分类: {categories}，hours={hours}")
 
@@ -52,8 +55,8 @@ def run_main_workflow(categories=None, hours: int = 24):
     for block in blocks:
         category = block.get("category", "unknown")
         items = block.get("items", [])
-        logger.info(f"分类 [{category}] 共有 {len(items)} 条")
 
+        logger.info(f"分类 [{category}] 共有 {len(items)} 条")
         if not items:
             logger.info(f"分类 [{category}] 无新闻，跳过风险评估与摘要生成")
             continue
@@ -64,11 +67,16 @@ def run_main_workflow(categories=None, hours: int = 24):
         # 2) 风险评估（Gemini）
         logger.info(f"分类 [{category}] 进行风险评估...")
         risk_data = run_risk_assessment_pipeline(block)
+
         low_count = sum(1 for it in risk_data.get("items", []) if it.get("ds_risk") == "low")
         high_count = sum(1 for it in risk_data.get("items", []) if it.get("ds_risk") == "high")
-        metrics.record_risk_assessment(total=len(risk_data.get("items", [])), low=low_count, high=high_count)
+        metrics.record_risk_assessment(
+            total=len(risk_data.get("items", [])),
+            low=low_count,
+            high=high_count,
+        )
 
-        # 3) 摘要生成（低风险 DeepSeek+fallback，高风险 Gemini）
+        # 3) 摘要生成
         logger.info(f"分类 [{category}] 生成摘要...")
         summaries = run_summary_generation_pipeline(risk_data)
         merged_summary = summaries.get("merged_summary", "") or ""
@@ -85,9 +93,6 @@ def run_main_workflow(categories=None, hours: int = 24):
         # 4) 写入文件：每类一个 merged html（文件名精确到秒）
         date_str = meta.get("dateStr") or datetime.now().strftime("%Y-%m-%d")
         safe_cat = _safe_filename(category)
-
-        # 旧：summary_{safe_cat}_{date_str}.html
-        # 新：summary_{safe_cat}_{date_str}_{run_ts}.html（精确到秒）
         filename = f"summary_{safe_cat}_{date_str}_{run_ts}.html"
         out_path = os.path.join(str(settings.DATA_DIR), filename)
 
@@ -103,10 +108,10 @@ def run_main_workflow(categories=None, hours: int = 24):
             }
         )
 
-        # ✅ 发送邮件：发的就是第四步生成的 merged_summary
-        subject = f"{date_str} {category} 新闻摘要（近{int(hours)}小时）"
+        # ✅ 发送邮件：标题不带日期，只要小时
+        subject = f"{hour_cn}-{category}"
         send_html_email(subject=subject, html_body=merged_summary)
-        logger.info(f"分类 [{category}] 邮件已发送")
+        logger.info(f"分类 [{category}] 邮件已发送，subject={subject}")
 
     # 5) 打印指标摘要
     metrics.print_summary()

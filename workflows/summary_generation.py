@@ -1,6 +1,8 @@
 """
 新闻摘要生成工作流
 """
+import re
+from datetime import datetime
 
 from llms.build_prompt import build_headline_prompt
 from llms.llms import LLMClient
@@ -11,33 +13,58 @@ from utils.logger import get_logger
 logger = get_logger("summary_generation")
 
 
+def _format_html_title(category: str, date_str: str | None, hour_str: str) -> str:
+    """
+    输出格式：YY-MM-DD-HH-栏目
+    - date_str 优先用传入的 YYYY-MM-DD；否则用当前日期
+    - hour_str 用当前小时（00-23）
+    """
+    if not date_str:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    # 只支持 YYYY-MM-DD；不符合就回退当前日期
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", date_str.strip())
+    if m:
+        yy = m.group(1)[-2:]
+        mm = m.group(2)
+        dd = m.group(3)
+    else:
+        now = datetime.now()
+        yy = now.strftime("%y")
+        mm = now.strftime("%m")
+        dd = now.strftime("%d")
+
+    cat = (category or "unknown").strip()
+    return f"{yy}-{mm}-{dd}-{hour_str}-{cat}"
+
+
+def _force_h1_title(html: str, title: str) -> str:
+    """
+    强制把 HTML 的第一个 <h1> 改成指定 title。
+    - 若没有 <h1>，则在最前面插入。
+    """
+    if not html:
+        return f"<h1>{title}</h1>"
+
+    if re.search(r"<h1>.*?</h1>", html, flags=re.DOTALL):
+        return re.sub(r"<h1>.*?</h1>", f"<h1>{title}</h1>", html, count=1, flags=re.DOTALL)
+
+    return f"<h1>{title}</h1>\n{html}"
+
+
 def run_summary_generation_pipeline(risk_annotated_data):
     """
     执行新闻摘要生成工作流
-
-    Args:
-        risk_annotated_data: 已标注风险等级的新闻数据，格式：
-            {
-                "section": "headline",
-                "category": "头条/政治/财经/科技/国际",  # 可选，但建议带上
-                "dateStr": "YYYY-MM-DD",               # 可选
-                "items": [{"ds_risk": "low/high/unknown", ...}, ...]
-            }
-
-    Returns:
-        dict:
-            {
-                "low_risk_summary": "...html...",
-                "high_risk_summary": "...html...",
-                "merged_summary": "...html...",
-                "meta": {...}
-            }
     """
     if not risk_annotated_data or risk_annotated_data.get("section") != "headline":
         raise ValueError("输入数据必须是 headline 类型，且 items 已包含 ds_risk")
 
     category = risk_annotated_data.get("category")
     date_str = risk_annotated_data.get("dateStr") or risk_annotated_data.get("date")
+
+    # 标题用“当前小时”（00-23）
+    now_hour = datetime.now().strftime("%H")
+    forced_title = _format_html_title(category or "unknown", date_str, now_hour)
 
     items = risk_annotated_data.get("items", [])
     low_items = [it for it in items if it.get("ds_risk") == "low"]
@@ -55,7 +82,6 @@ def run_summary_generation_pipeline(risk_annotated_data):
     low_risk_summary = ""
     low_meta = {"model_used": None, "is_fallback": False, "filter_reason": None}
     low_refs = []
-
     if low_items:
         low_block = {
             "section": "headline",
@@ -74,15 +100,16 @@ def run_summary_generation_pipeline(risk_annotated_data):
             prompt=low_prompt_data["prompt"],
             primary="deepseek",
             temperature=0.3,
-            max_tokens=4000
+            max_tokens=4000,
         )
 
         low_risk_summary = resp.get("content", "") or ""
         low_meta = {
             "model_used": resp.get("model_used"),
             "is_fallback": bool(resp.get("is_fallback")),
-            "filter_reason": resp.get("filter_reason")
+            "filter_reason": resp.get("filter_reason"),
         }
+
         logger.info(f"✓ 低风险摘要生成完成，模型: {low_meta['model_used']}, fallback: {low_meta['is_fallback']}")
     else:
         logger.info("低风险新闻为空，跳过低风险摘要生成")
@@ -90,7 +117,6 @@ def run_summary_generation_pipeline(risk_annotated_data):
     # ---------- 高风险（直接 Gemini）----------
     high_risk_summary = ""
     high_refs = []
-
     if high_items:
         high_block = {
             "section": "headline",
@@ -108,8 +134,9 @@ def run_summary_generation_pipeline(risk_annotated_data):
         high_risk_summary = llm_client.request_gemini(
             prompt=high_prompt_data["prompt"],
             temperature=0.3,
-            max_tokens=4000
+            max_tokens=4000,
         ) or ""
+
         logger.info("✓ 高风险摘要生成完成")
     else:
         logger.info("高风险新闻为空，跳过高风险摘要生成")
@@ -120,20 +147,15 @@ def run_summary_generation_pipeline(risk_annotated_data):
         high_risk_summary,
         date=date_str,
         category=category,
-        add_section_headers=True
+        add_section_headers=True,
     )
 
     # 合并后统一把 #refN 替换为真实 URL
-    # 注意：低/高风险各自的 refs 编号都是从 1 开始，合并时高风险引用会被重编号，
-    # 因此需要把 high_refs 的 n 也按 offset 平移后再一起替换
+    # 低/高风险各自 refs 编号从 1 开始；合并时高风险引用会被平移
     all_refs = []
     offset = 0
-
-    # 计算低风险最大引用编号 offset（与 merge_summaries 的逻辑一致：offset = low_max_ref）
-    # 为简化起见：用 low_refs 的最大 n 作为 offset（如果 low 为空则 offset=0）
     if low_refs:
         offset = max(r.get("n", 0) for r in low_refs if isinstance(r.get("n"), int)) or 0
-
     all_refs.extend(low_refs)
 
     if high_refs:
@@ -150,9 +172,14 @@ def run_summary_generation_pipeline(risk_annotated_data):
 
     merged_summary = process_summary_links(merged_summary, all_refs)
 
-    # 如果你仍想保留分开版本，也可以分开替换链接
+    # 分开版本也替换链接
     low_risk_summary = process_summary_links(low_risk_summary, low_refs) if low_risk_summary else ""
     high_risk_summary = process_summary_links(high_risk_summary, high_refs) if high_risk_summary else ""
+
+    # ✅ 统一强制标题（合并/不合并都生效）
+    merged_summary = _force_h1_title(merged_summary, forced_title) if merged_summary else ""
+    low_risk_summary = _force_h1_title(low_risk_summary, forced_title) if low_risk_summary else ""
+    high_risk_summary = _force_h1_title(high_risk_summary, forced_title) if high_risk_summary else ""
 
     return {
         "low_risk_summary": low_risk_summary,
@@ -161,11 +188,13 @@ def run_summary_generation_pipeline(risk_annotated_data):
         "meta": {
             "category": category,
             "dateStr": date_str,
+            "titleHour": now_hour,
+            "forcedTitle": forced_title,
             "total_items": len(items),
             "low_items": len(low_items),
             "high_items": len(high_items),
             "low_model_used": low_meta.get("model_used"),
             "low_is_fallback": low_meta.get("is_fallback"),
             "low_filter_reason": low_meta.get("filter_reason"),
-        }
+        },
     }
