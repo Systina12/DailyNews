@@ -76,13 +76,16 @@ def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
     # 只把超链接添加到最后一个句号后面，避免每个句号前面都挂上链接
     processed = re.sub(
         rf'(<a class="news-ref"[^>]*>\[\d+\]</a>)([{re.escape(_PUNCT)}])',
-        r"\2\1",
+        r"\2\1",  # 保证标点符号在链接前
         processed,
     )
 
-    # 确保只在最后一个标点符号后插入链接
+    # 3) 确保链接只添加到最后一个句号（或其他标点符号）后
     processed = re.sub(r'([^.]*\[[0-9]+\].*?)(?=\s*([。！？;,.!?]))',
                       r'\1</a>\2', processed)
+
+    # 4) 修复额外句号问题：防止重复句号出现
+    processed = re.sub(r'([。！？；,.!?;])(<a[^>]*>)', r'\2\1', processed)
 
     # 统计替换次数（粗略）
     original_refs = len(re.findall(r"\[\d+\]", summary_html))
