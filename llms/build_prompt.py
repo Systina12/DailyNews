@@ -68,9 +68,9 @@ RISK_ASSESSMENT_TEMPLATE = """你是一个"DeepSeek 风控失败概率判定器"
 {news_items}"""
 
 
-HEADLINE_TEMPLATE = """你是一名严谨的新闻编辑，请用中文撰写【头条】栏目（日期：{date}）。
+HEADLINE_TEMPLATE = """你是一名严谨的新闻编辑，请用中文撰写栏目（日期：{date}）。
 【写作要求】
-1) 只写"头条"栏目
+1) 只写"{category}"栏目
 2) 行文克制、中性，不评论、不预测、不下结论
 3) 不可以选择性使用素材，必须覆盖所有编号
 
@@ -80,7 +80,7 @@ HEADLINE_TEMPLATE = """你是一名严谨的新闻编辑，请用中文撰写【
 
 【格式要求】
 - 只输出 HTML
-- 必须以 <h1>{date} 头条</h1> 开头
+- 必须以 <h1>{date} {category}</h1> 开头
 - 正文只能由若干 <p>...</p> 组成
 
 【引用规则】
@@ -90,6 +90,7 @@ HEADLINE_TEMPLATE = """你是一名严谨的新闻编辑，请用中文撰写【
 以下是可用的新闻素材：
 
 {news_items}"""
+
 
 
 # ========== Prompt 构建函数 ==========
@@ -167,13 +168,17 @@ def build_headline_prompt(input_block, risk_filter="low"):
         refs.append({"n": idx, "title": title, "url": link})
         news_lines.append(f"【{idx}】\n标题：{title}\n摘要：{summary}\n")
 
+    category = input_block.get("category") or "头条"
+
     prompt = HEADLINE_TEMPLATE.format(
         date=date_str,
+        category=category,
         news_items="\n".join(news_lines)
     )
 
     return {
         "section": "headline",
+        "category": category,
         "dateStr": date_str,
         "prompt": prompt,
         "refs": refs,

@@ -1,139 +1,149 @@
 """
-完整的新闻处理主工作流
-
-整合所有处理步骤：
-1. 获取和预处理新闻
-2. 风险评估
-3. 生成摘要
+主工作流入口：新闻处理 -> 风险评估 -> 摘要生成 -> 写入文件（支持多分类 + hours 参数）
 """
+import os
+import argparse
+from datetime import datetime
 
-from workflows.news_pipeline import run_news_pipeline
+from config import settings
+from monitoring.metrics import metrics
+from workflows.news_pipeline import run_news_pipeline_all
 from workflows.risk_assessment import run_risk_assessment_pipeline
 from workflows.summary_generation import run_summary_generation_pipeline
-from config import settings
+from utils.email_sender import send_html_email
 from utils.logger import get_logger
-from monitoring import metrics
 
 logger = get_logger("main_workflow")
 
 
-def run_main_workflow():
+def _safe_filename(s: str) -> str:
+    """简单的文件名清洗：把空格/斜杠等替换掉，避免写文件失败"""
+    if not s:
+        return "unknown"
+    bad = ['/', '\\', ':', '*', '?', '"', '<', '>', '|', ' ']
+    out = s
+    for ch in bad:
+        out = out.replace(ch, "_")
+    return out
+
+
+def run_main_workflow(categories=None, hours: int = 24):
     """
-    执行完整的新闻处理工作流
-
-    流程：
-    1. 获取 24 小时新闻并预处理（过滤、去重、分类）
-    2. 使用 Gemini 评估 DeepSeek 风险等级
-    3. 根据风险等级生成摘要：
-       - 低风险：使用 DeepSeek
-       - 高风险：使用 Gemini
-
-    Returns:
-        dict: 完整的处理结果
-            {
-                "classified_data": {...},  # 分类后的新闻数据
-                "risk_data": {...},        # 风险标注后的数据
-                "summaries": {             # 生成的摘要
-                    "low_risk_summary": "...",
-                    "high_risk_summary": "...",
-                    "merged_summary": "...",  # 合并后的完整摘要
-                    "meta": {...}
-                }
-            }
-
-    Raises:
-        ValueError: 配置错误
-        RuntimeError: 运行时错误
+    运行主工作流（多分类）
+    Args:
+        categories: 分类列表，默认 ["头条","政治","财经","科技"]
+        hours: 拉取最近多少小时的新闻（默认 24）
     """
-
-    logger.info("=" * 60)
-    logger.info("开始执行新闻处理工作流")
-    logger.info("=" * 60)
-
-    # 确保必要的目录存在
     settings.ensure_directories()
+    settings.validate()
 
-    # 步骤 1: 获取和预处理新闻
-    logger.info("\n[步骤 1/3] 获取和预处理新闻...")
-    classified_data = run_news_pipeline()
-    item_count = len(classified_data.get('items', []))
-    logger.info(f"✓ 完成预处理，共 {item_count} 条新闻")
-    metrics.increment_counter("news_processed", item_count)
+    default_categories = ["头条", "政治", "财经", "科技"]  # , "国际"
+    categories = categories or default_categories
 
-    # 步骤 2: 风险评估
-    logger.info("\n[步骤 2/3] 评估 DeepSeek 风险等级...")
-    risk_data = run_risk_assessment_pipeline(classified_data)
+    # 用“精确到秒”的时间戳做本次运行的输出文件后缀
+    run_ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    # 邮件标题只用“小时”
+    hour_cn = f"{datetime.now().strftime('%H')}点"
 
-    low_count = sum(1 for item in risk_data.get("items", []) if item.get("ds_risk") == "low")
-    high_count = sum(1 for item in risk_data.get("items", []) if item.get("ds_risk") == "high")
-    logger.info(f"✓ 完成风险评估")
-    logger.info(f"  - 低风险: {low_count} 条")
-    logger.info(f"  - 高风险: {high_count} 条")
-    metrics.record_risk_assessment(item_count, low_count, high_count)
+    logger.info(f"开始主工作流，多分类: {categories}，hours={hours}")
 
-    # 步骤 3: 生成摘要
-    logger.info("\n[步骤 3/3] 生成新闻摘要...")
-    summaries = run_summary_generation_pipeline(risk_data)
-    logger.info(f"✓ 完成摘要生成")
-    logger.info(f"  - 低风险摘要: {'已生成' if summaries.get('low_risk_summary') else '无'}")
-    logger.info(f"  - 高风险摘要: {'已生成' if summaries.get('high_risk_summary') else '无'}")
-    logger.info(f"  - 合并摘要: {'已生成' if summaries.get('merged_summary') else '无'}")
+    # 1) 获取 + 预处理 + 分类（一次拉取，多分类输出）
+    logger.info("运行新闻预处理与分类...")
+    blocks = run_news_pipeline_all(categories=categories, hours=hours)
 
-    # 记录fallback信息
-    if summaries.get('meta', {}).get('low_risk_fallback'):
-        logger.warning(f"  ⚠ 低风险摘要触发fallback: {summaries['meta'].get('fallback_reason')}")
-        logger.info(f"    实际使用模型: {summaries['meta'].get('low_risk_model')}")
-        metrics.record_fallback(
-            reason=summaries['meta'].get('fallback_reason', 'unknown'),
-            primary_model="deepseek",
-            fallback_model=summaries['meta'].get('low_risk_model', 'gemini')
+    results = []
+    for block in blocks:
+        category = block.get("category", "unknown")
+        items = block.get("items", [])
+
+        logger.info(f"分类 [{category}] 共有 {len(items)} 条")
+        if not items:
+            logger.info(f"分类 [{category}] 无新闻，跳过风险评估与摘要生成")
+            continue
+
+        # 计数：处理条数（按分类累计）
+        metrics.increment_counter(f"news_processed_{category}", len(items))
+
+        # 2) 风险评估（Gemini）
+        logger.info(f"分类 [{category}] 进行风险评估...")
+        risk_data = run_risk_assessment_pipeline(block)
+
+        low_count = sum(1 for it in risk_data.get("items", []) if it.get("ds_risk") == "low")
+        high_count = sum(1 for it in risk_data.get("items", []) if it.get("ds_risk") == "high")
+        metrics.record_risk_assessment(
+            total=len(risk_data.get("items", [])),
+            low=low_count,
+            high=high_count,
         )
 
-    logger.info("\n" + "=" * 60)
-    logger.info("工作流执行完成")
-    logger.info("=" * 60)
+        # 3) 摘要生成
+        logger.info(f"分类 [{category}] 生成摘要...")
+        summaries = run_summary_generation_pipeline(risk_data)
+        merged_summary = summaries.get("merged_summary", "") or ""
+        meta = summaries.get("meta", {}) or {}
 
-    # 打印指标摘要
+        # 如果低风险触发 fallback，记录一次
+        if meta.get("low_is_fallback"):
+            metrics.record_fallback(
+                reason=meta.get("low_filter_reason") or "content_filtered",
+                primary_model="deepseek",
+                fallback_model="gemini",
+            )
+
+        # 4) 写入文件：每类一个 merged html（文件名精确到秒）
+        date_str = meta.get("dateStr") or datetime.now().strftime("%Y-%m-%d")
+        safe_cat = _safe_filename(category)
+        filename = f"summary_{safe_cat}_{date_str}_{run_ts}.html"
+        out_path = os.path.join(str(settings.DATA_DIR), filename)
+
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(merged_summary)
+
+        logger.info(f"分类 [{category}] 输出文件: {out_path}")
+        results.append(
+            {
+                "category": category,
+                "output_path": out_path,
+                "meta": meta,
+            }
+        )
+
+        # ✅ 发送邮件：标题不带日期，只要小时
+        subject = f"{hour_cn}-{category}"
+        send_html_email(subject=subject, html_body=merged_summary)
+        logger.info(f"分类 [{category}] 邮件已发送，subject={subject}")
+
+    # 5) 打印指标摘要
     metrics.print_summary()
 
     return {
-        "classified_data": classified_data,
-        "risk_data": risk_data,
-        "summaries": summaries
+        "results": results,
+        "meta": {
+            "generated_at": datetime.now().isoformat(),
+            "categories": categories,
+            "hours": int(hours),
+        },
     }
 
 
+def _parse_args():
+    p = argparse.ArgumentParser(description="DailyNews 主工作流（多分类）")
+    p.add_argument(
+        "--hours",
+        type=int,
+        default=24,
+        help="拉取最近多少小时的新闻（默认 24）",
+    )
+    p.add_argument(
+        "--categories",
+        type=str,
+        default="",
+        help='分类列表，逗号分隔，例如： "头条,政治,财经,科技"；不传则用默认分类',
+    )
+    return p.parse_args()
+
+
 if __name__ == "__main__":
-    try:
-        result = run_main_workflow()
-
-        # 输出摘要到文件
-        from datetime import datetime
-        from pathlib import Path
-
-        output_dir = settings.DATA_DIR
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # 保存合并后的摘要（主要输出）
-        if result["summaries"].get("merged_summary"):
-            merged_file = output_dir / f"summary_{timestamp}.html"
-            with open(merged_file, "w", encoding="utf-8") as f:
-                f.write(result["summaries"]["merged_summary"])
-            logger.info(f"\n合并摘要已保存到: {merged_file}")
-
-        # 保存单独的摘要（用于调试）
-        if result["summaries"].get("low_risk_summary"):
-            low_file = output_dir / f"low_risk_summary_{timestamp}.html"
-            with open(low_file, "w", encoding="utf-8") as f:
-                f.write(result["summaries"]["low_risk_summary"])
-            logger.info(f"低风险摘要已保存到: {low_file}")
-
-        if result["summaries"].get("high_risk_summary"):
-            high_file = output_dir / f"high_risk_summary_{timestamp}.html"
-            with open(high_file, "w", encoding="utf-8") as f:
-                f.write(result["summaries"]["high_risk_summary"])
-            logger.info(f"高风险摘要已保存到: {high_file}")
-
-    except Exception as e:
-        logger.error(f"\n错误: {e}", exc_info=True)
-        raise
+    args = _parse_args()
+    cats = [x.strip() for x in (args.categories or "").split(",") if x.strip()] or None
+    run_main_workflow(categories=cats, hours=args.hours)

@@ -1,148 +1,200 @@
 """
 新闻摘要生成工作流
 """
+import re
+from datetime import datetime
 
 from llms.build_prompt import build_headline_prompt
 from llms.llms import LLMClient
-from utils.merge_summaries import merge_summaries
 from utils.link_processor import process_summary_links
+from utils.merge_summaries import merge_summaries
 from utils.logger import get_logger
 
 logger = get_logger("summary_generation")
 
 
+def _format_html_title(category: str, date_str: str | None, hour_str: str) -> str:
+    """
+    输出格式：YY-MM-DD-HH-栏目
+    - date_str 优先用传入的 YYYY-MM-DD；否则用当前日期
+    - hour_str 用当前小时（00-23）
+    """
+    if not date_str:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    # 只支持 YYYY-MM-DD；不符合就回退当前日期
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", date_str.strip())
+    if m:
+        yy = m.group(1)[-2:]
+        mm = m.group(2)
+        dd = m.group(3)
+    else:
+        now = datetime.now()
+        yy = now.strftime("%y")
+        mm = now.strftime("%m")
+        dd = now.strftime("%d")
+
+    cat = (category or "unknown").strip()
+    return f"{yy}-{mm}-{dd}-{hour_str}-{cat}"
+
+
+def _force_h1_title(html: str, title: str) -> str:
+    """
+    强制把 HTML 的第一个 <h1> 改成指定 title。
+    - 若没有 <h1>，则在最前面插入。
+    """
+    if not html:
+        return f"<h1>{title}</h1>"
+
+    if re.search(r"<h1>.*?</h1>", html, flags=re.DOTALL):
+        return re.sub(r"<h1>.*?</h1>", f"<h1>{title}</h1>", html, count=1, flags=re.DOTALL)
+
+    return f"<h1>{title}</h1>\n{html}"
+
+
 def run_summary_generation_pipeline(risk_annotated_data):
     """
     执行新闻摘要生成工作流
-
-    根据风险等级选择不同的 LLM 生成摘要：
-    - low 风险：使用 DeepSeek（带自动 fallback 到 Gemini）
-    - high 风险：直接使用 Gemini
-
-    Args:
-        risk_annotated_data: 标注了风险等级的新闻数据，格式：
-            {
-                "section": "headline",
-                "items": [
-                    {
-                        "id": "H1",
-                        "title": "...",
-                        "summary": "...",
-                        "ds_risk": "low" or "high",
-                        ...
-                    },
-                    ...
-                ]
-            }
-
-    Returns:
-        dict: 生成的摘要结果
-            {
-                "low_risk_summary": "生成的 HTML 摘要",
-                "high_risk_summary": "生成的 HTML 摘要",
-                "merged_summary": "合并后的完整 HTML 摘要",
-                "meta": {
-                    "low_count": int,
-                    "high_count": int,
-                    "total_count": int,
-                    "low_risk_model": str,      # 实际使用的模型
-                    "low_risk_fallback": bool   # 是否触发了 fallback
-                }
-            }
-
-    Raises:
-        ValueError: 配置错误或输入数据格式错误
-        RuntimeError: LLM API 调用失败
     """
-
     if not risk_annotated_data or risk_annotated_data.get("section") != "headline":
-        raise ValueError("输入数据必须是 headline 类型的风险标注结果")
+        raise ValueError("输入数据必须是 headline 类型，且 items 已包含 ds_risk")
+
+    category = risk_annotated_data.get("category")
+    date_str = risk_annotated_data.get("dateStr") or risk_annotated_data.get("date")
+
+    # 标题用“当前小时”（00-23）
+    now_hour = datetime.now().strftime("%H")
+    forced_title = _format_html_title(category or "unknown", date_str, now_hour)
+
+    items = risk_annotated_data.get("items", [])
+    low_items = [it for it in items if it.get("ds_risk") == "low"]
+    high_items = [it for it in items if it.get("ds_risk") == "high"]
+
+    logger.info(
+        f"开始生成摘要，共 {len(items)} 条新闻"
+        + (f"（{category}）" if category else "")
+        + f"，低风险 {len(low_items)}，高风险 {len(high_items)}"
+    )
 
     llm_client = LLMClient()
-    results = {
-        "low_risk_summary": None,
-        "high_risk_summary": None,
-        "merged_summary": None,
-        "meta": {
-            "low_count": 0,
-            "high_count": 0,
-            "total_count": len(risk_annotated_data.get("items", [])),
-            "low_risk_model": None,
-            "low_risk_fallback": False,
-            "fallback_reason": None
+
+    # ---------- 低风险（DeepSeek 主，触发过滤才 fallback Gemini）----------
+    low_risk_summary = ""
+    low_meta = {"model_used": None, "is_fallback": False, "filter_reason": None}
+    low_refs = []
+    if low_items:
+        low_block = {
+            "section": "headline",
+            "items": low_items,
         }
-    }
+        if category:
+            low_block["category"] = category
+        if date_str:
+            low_block["dateStr"] = date_str
 
-    # 1. 处理低风险新闻（使用 DeepSeek，带自动 fallback）
-    low_prompt_data = build_headline_prompt(risk_annotated_data, risk_filter="low")
+        low_prompt_data = build_headline_prompt(low_block, risk_filter="low")
+        low_refs = low_prompt_data.get("refs", [])
 
-    if low_prompt_data and low_prompt_data.get("prompt"):
-        logger.info(f"正在生成低风险新闻摘要...")
-        logger.info(f"低风险新闻数量: {low_prompt_data['meta']['filtered']}")
-
-        try:
-            response = llm_client.request_with_fallback(
-                prompt=low_prompt_data["prompt"],
-                temperature=0.3,
-                max_tokens=4000,
-                primary="deepseek"
-            )
-
-            # 处理摘要中的引用链接
-            raw_summary = response["content"]
-            processed_summary = process_summary_links(raw_summary, low_prompt_data.get("refs", []))
-
-            results["low_risk_summary"] = processed_summary
-            results["meta"]["low_count"] = low_prompt_data["meta"]["filtered"]
-            results["meta"]["low_risk_model"] = response["model_used"]
-            results["meta"]["low_risk_fallback"] = response["is_fallback"]
-            results["meta"]["fallback_reason"] = response["filter_reason"]
-
-            if response["is_fallback"]:
-                logger.info(f"✓ 完成（使用 {response['model_used']}，触发 fallback）")
-            else:
-                logger.info(f"✓ 完成（使用 {response['model_used']}）")
-
-        except Exception as e:
-            logger.error(f"生成低风险摘要失败: {e}")
-            raise RuntimeError(f"生成低风险摘要失败: {e}")
-    else:
-        logger.info("没有低风险新闻需要处理")
-
-    # 2. 处理高风险新闻（使用 Gemini）
-    high_prompt_data = build_headline_prompt(risk_annotated_data, risk_filter="high")
-
-    if high_prompt_data and high_prompt_data.get("prompt"):
-        logger.info(f"正在使用 Gemini 生成高风险新闻摘要...")
-        logger.info(f"高风险新闻数量: {high_prompt_data['meta']['filtered']}")
-
-        try:
-            high_summary = llm_client.request_gemini(
-                prompt=high_prompt_data["prompt"],
-                temperature=0.3,
-                max_tokens=4000
-            )
-
-            # 处理摘要中的引用链接
-            processed_high_summary = process_summary_links(high_summary, high_prompt_data.get("refs", []))
-
-            results["high_risk_summary"] = processed_high_summary
-            results["meta"]["high_count"] = high_prompt_data["meta"]["filtered"]
-            logger.info("✓ 完成（使用 gemini）")
-        except Exception as e:
-            logger.error(f"Gemini 生成摘要失败: {e}")
-            raise RuntimeError(f"Gemini 生成摘要失败: {e}")
-    else:
-        logger.info("没有高风险新闻需要处理")
-
-    # 3. 合并摘要
-    if results["low_risk_summary"] or results["high_risk_summary"]:
-        logger.info("正在合并摘要...")
-        results["merged_summary"] = merge_summaries(
-            low_risk_summary=results["low_risk_summary"],
-            high_risk_summary=results["high_risk_summary"],
-            add_section_headers=True
+        logger.info("生成低风险摘要（DeepSeek 主 + fallback）...")
+        resp = llm_client.request_with_fallback(
+            prompt=low_prompt_data["prompt"],
+            primary="deepseek",
+            temperature=0.3,
+            max_tokens=4000,
         )
-        logger.info("✓ 摘要合并完成")
 
-    return results
+        low_risk_summary = resp.get("content", "") or ""
+        low_meta = {
+            "model_used": resp.get("model_used"),
+            "is_fallback": bool(resp.get("is_fallback")),
+            "filter_reason": resp.get("filter_reason"),
+        }
+
+        logger.info(f"✓ 低风险摘要生成完成，模型: {low_meta['model_used']}, fallback: {low_meta['is_fallback']}")
+    else:
+        logger.info("低风险新闻为空，跳过低风险摘要生成")
+
+    # ---------- 高风险（直接 Gemini）----------
+    high_risk_summary = ""
+    high_refs = []
+    if high_items:
+        high_block = {
+            "section": "headline",
+            "items": high_items,
+        }
+        if category:
+            high_block["category"] = category
+        if date_str:
+            high_block["dateStr"] = date_str
+
+        high_prompt_data = build_headline_prompt(high_block, risk_filter="high")
+        high_refs = high_prompt_data.get("refs", [])
+
+        logger.info("生成高风险摘要（Gemini）...")
+        high_risk_summary = llm_client.request_gemini(
+            prompt=high_prompt_data["prompt"],
+            temperature=0.3,
+            max_tokens=4000,
+        ) or ""
+
+        logger.info("✓ 高风险摘要生成完成")
+    else:
+        logger.info("高风险新闻为空，跳过高风险摘要生成")
+
+    # ---------- 合并（先合并再替换链接，避免合并时引用重编号失效）----------
+    merged_summary = merge_summaries(
+        low_risk_summary,
+        high_risk_summary,
+        date=date_str,
+        category=category,
+        add_section_headers=True,
+    )
+
+    # 合并后统一把 #refN 替换为真实 URL
+    # 低/高风险各自 refs 编号从 1 开始；合并时高风险引用会被平移
+    all_refs = []
+    offset = 0
+    if low_refs:
+        offset = max(r.get("n", 0) for r in low_refs if isinstance(r.get("n"), int)) or 0
+    all_refs.extend(low_refs)
+
+    if high_refs:
+        shifted_high_refs = []
+        for r in high_refs:
+            n = r.get("n")
+            if isinstance(n, int):
+                shifted = dict(r)
+                shifted["n"] = n + offset
+                shifted_high_refs.append(shifted)
+            else:
+                shifted_high_refs.append(r)
+        all_refs.extend(shifted_high_refs)
+
+    merged_summary = process_summary_links(merged_summary, all_refs)
+
+    # 分开版本也替换链接
+    low_risk_summary = process_summary_links(low_risk_summary, low_refs) if low_risk_summary else ""
+    high_risk_summary = process_summary_links(high_risk_summary, high_refs) if high_risk_summary else ""
+
+    # ✅ 统一强制标题（合并/不合并都生效）
+    merged_summary = _force_h1_title(merged_summary, forced_title) if merged_summary else ""
+    low_risk_summary = _force_h1_title(low_risk_summary, forced_title) if low_risk_summary else ""
+    high_risk_summary = _force_h1_title(high_risk_summary, forced_title) if high_risk_summary else ""
+
+    return {
+        "low_risk_summary": low_risk_summary,
+        "high_risk_summary": high_risk_summary,
+        "merged_summary": merged_summary,
+        "meta": {
+            "category": category,
+            "dateStr": date_str,
+            "titleHour": now_hour,
+            "forcedTitle": forced_title,
+            "total_items": len(items),
+            "low_items": len(low_items),
+            "high_items": len(high_items),
+            "low_model_used": low_meta.get("model_used"),
+            "low_is_fallback": low_meta.get("is_fallback"),
+            "low_filter_reason": low_meta.get("filter_reason"),
+        },
+    }

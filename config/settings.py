@@ -26,7 +26,7 @@ class Settings:
     FRESHRSS_EMAIL = os.getenv("FRESHRSS_EMAIL", "")
     FRESHRSS_PASSWORD = os.getenv("FRESHRSS_PASSWORD", "")
 
-    # LLM API 配置
+    # deepseek API 配置
     DEEPSEEK_API_URL = os.getenv(
         "DEEPSEEK_API_URL",
         "https://api.deepseek.com/v1/chat/completions"
@@ -56,6 +56,17 @@ class Settings:
     # LLM 请求配置
     DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", "0.3"))
     DEFAULT_MAX_TOKENS = int(os.getenv("DEFAULT_MAX_TOKENS", "4000"))
+
+    # SMTP配置（从环境变量读取）
+    SMTP_HOST = os.getenv("SMTP_HOST", "")
+    SMTP_PORT = os.getenv("SMTP_PORT", "465")  # 先保留为字符串，使用时再 int()
+    SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+    SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
+    SMTP_FROM = os.getenv("SMTP_FROM", "")
+    #woshishabi
+    SMTP_TO = os.getenv("SMTP_TO", "")  # 多个收件人用逗号分隔
 
     @classmethod
     def ensure_directories(cls):
