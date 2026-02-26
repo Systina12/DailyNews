@@ -16,6 +16,21 @@ def _extract_summary(item):
     return summary or ""
 
 
+def _extract_link(item):
+    """提取新闻链接"""
+    link = ""
+    canonical = item.get("canonical")
+    if isinstance(canonical, list) and canonical:
+        link = canonical[0].get("href", "") or ""
+    if not link:
+        alternate = item.get("alternate")
+        if isinstance(alternate, list) and alternate:
+            link = alternate[0].get("href", "") or ""
+    if not link:
+        link = item.get("link", "") or ""
+    return link
+
+
 def _get_item_risk(item, risk_map, index):
     """获取新闻条目的风险等级"""
     risk = item.get("ds_risk")
@@ -187,7 +202,7 @@ def build_headline_prompt(input_block, risk_filter="low"):
     for idx, item in enumerate(filtered_news, start=1):
         title = _clean_text(item.get("title"))
         summary = _clean_text(_extract_summary(item))
-        link = item.get("link") or ""
+        link = _extract_link(item)
         
         # 验证标题不为空
         if not title:
