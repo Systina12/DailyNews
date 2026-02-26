@@ -75,3 +75,6 @@ deepseek_limiter = RateLimiter(max_calls=50, time_window=60)
 
 # Gemini: 假设限制为 60 次/分钟
 gemini_limiter = RateLimiter(max_calls=50, time_window=60)
+
+# Gemini Flash: 更高的速率限制（便宜模型通常限制更宽松）
+gemini_flash_limiter = RateLimiter(max_calls=100, time_window=60)

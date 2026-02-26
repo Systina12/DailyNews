@@ -54,18 +54,18 @@ def run_risk_assessment_pipeline(classified_data):
     if not prompt_data:
         raise ValueError("无法构建风险评估 prompt（可能是 items 为空）")
 
-    # 3. 请求 Gemini
-    logger.info("请求 Gemini 进行风险评估...")
+    # 3. 请求 Gemini Flash（便宜模型）
+    logger.info("请求 Gemini Flash 进行风险评估...")
     llm_client = LLMClient()
     try:
-        response = llm_client.request_gemini(
+        response = llm_client.request_gemini_flash(
             prompt=prompt_data["prompt"],
             temperature=0.1,
             max_tokens=1000
         )
-        logger.info("✓ Gemini 响应成功")
+        logger.info("✓ Gemini Flash 响应成功")
     except Exception as e:
-        logger.error(f"Gemini 风险评估失败: {e}")
+        logger.error(f"Gemini Flash 风险评估失败: {e}")
         # 失败时标记所有新闻为高风险（保守策略）
         logger.warning("风险评估失败，将所有新闻标记为高风险")
         items_with_risk = []

@@ -8,7 +8,7 @@ from .exceptions import ContentFilteredException
 from utils.deepseek_check import check_deepseek_response
 from config import settings
 from utils.logger import get_logger
-from utils.rate_limiter import deepseek_limiter, gemini_limiter
+from utils.rate_limiter import deepseek_limiter, gemini_limiter, gemini_flash_limiter
 
 logger = get_logger("llms")
 
@@ -151,6 +151,63 @@ class LLMClient:
                     raise RuntimeError("无法连接到 Gemini API")
                 else:
                     raise RuntimeError(f"Gemini API 请求错误: {str(e)}")
+
+    def request_gemini_flash(self, prompt: str, temperature: float = 0.7, max_tokens: int = 4000) -> str:
+        """
+        请求 Gemini Flash 便宜模型（用于分类、风险评估等简单任务）
+        
+        Args:
+            prompt: 提示词
+            temperature: 温度参数
+            max_tokens: 最大 token 数
+            
+        Returns:
+            str: 模型响应内容
+        """
+        if not prompt:
+            raise ValueError("prompt 不能为空")
+        
+        # 检查 prompt 长度
+        estimated_tokens = len(prompt) // 4
+        if estimated_tokens > 1000000:  # Gemini Flash 上下文限制
+            logger.warning(f"Prompt 过长，估计 {estimated_tokens} tokens，可能超过限制")
+
+        max_retries = 3
+        retry_delay = 1  # 秒
+
+        for attempt in range(max_retries):
+            # 应用速率限制
+            gemini_flash_limiter.acquire()
+            try:
+                # 生成内容
+                response = self.gemini_client.models.generate_content(
+                    model=settings.GEMINI_FLASH_MODEL,
+                    contents=prompt,
+                )
+
+                return response.text
+
+            except Exception as e:
+                error_msg = str(e).lower()
+
+                # 认证错误不重试
+                if "api key" in error_msg or "authentication" in error_msg:
+                    raise RuntimeError("Gemini Flash API 认证失败，请检查 API Key")
+
+                # 可重试的错误
+                if attempt < max_retries - 1:
+                    if "timeout" in error_msg or "connection" in error_msg or "503" in error_msg or "500" in error_msg:
+                        logger.warning(f"Gemini Flash API 临时错误，重试 {attempt + 1}/{max_retries - 1}: {error_msg}")
+                        time.sleep(retry_delay * (attempt + 1))
+                        continue
+
+                # 最后一次尝试失败或不可重试的错误
+                if "timeout" in error_msg:
+                    raise RuntimeError(f"Gemini Flash API 请求超时 (>{self.timeout}秒)")
+                elif "connection" in error_msg:
+                    raise RuntimeError("无法连接到 Gemini Flash API")
+                else:
+                    raise RuntimeError(f"Gemini Flash API 请求错误: {str(e)}")
 
     def request_with_fallback(self, prompt: str, temperature: float = 0.7, max_tokens: int = 2000, primary: str = "deepseek"):
         """
