@@ -25,11 +25,19 @@ class Classify:
         """
         title = (item.get("title") or "").lower()
         src = (item.get("origin", {}).get("title") or "").lower()
-        link = (
-            item.get("canonical", [{}])[0].get("href") or
-            item.get("alternate", [{}])[0].get("href") or
-            item.get("link") or ""
-        ).lower()
+        
+        # 安全提取链接
+        link = ""
+        canonical = item.get("canonical")
+        if isinstance(canonical, list) and len(canonical) > 0:
+            link = canonical[0].get("href", "")
+        if not link:
+            alternate = item.get("alternate")
+            if isinstance(alternate, list) and len(alternate) > 0:
+                link = alternate[0].get("href", "")
+        if not link:
+            link = item.get("link", "")
+        link = link.lower()
 
         # 收集所有文本
         text_parts = [
@@ -172,8 +180,9 @@ class Classify:
         result = []
 
         for item in raw_items:
-            # 跳过无标题
-            if not item.get("title"):
+            # 跳过无标题或空标题
+            title = item.get("title")
+            if not title or not title.strip():
                 continue
 
             # 第一步：硬排除（娱乐、体育、节目等）
@@ -187,12 +196,17 @@ class Classify:
             if item_category != self.category:
                 continue
 
-            # 提取链接
-            link = (
-                item.get("canonical", [{}])[0].get("href") or
-                item.get("alternate", [{}])[0].get("href") or
-                item.get("link") or ""
-            )
+            # 提取链接（安全处理）
+            link = ""
+            canonical = item.get("canonical")
+            if isinstance(canonical, list) and len(canonical) > 0:
+                link = canonical[0].get("href", "")
+            if not link:
+                alternate = item.get("alternate")
+                if isinstance(alternate, list) and len(alternate) > 0:
+                    link = alternate[0].get("href", "")
+            if not link:
+                link = item.get("link", "")
 
             # 提取摘要
             summary = item.get("summaryText")

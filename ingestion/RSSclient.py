@@ -23,34 +23,57 @@ class RSSClient:
 
     def _get_freshrss_auth(self):
         logger.info("开始 FreshRSS 认证")
+        
+        if not settings.FRESHRSS_EMAIL or not settings.FRESHRSS_PASSWORD:
+            logger.error("FreshRSS 凭证未配置")
+            raise ValueError("FRESHRSS_EMAIL 或 FRESHRSS_PASSWORD 未设置")
+        
         params = {
             "Email": settings.FRESHRSS_EMAIL,
             "Passwd": settings.FRESHRSS_PASSWORD,
         }
-        try:
-            resp = requests.get(self.auth_url, params=params, timeout=self.timeout)
-            resp.raise_for_status()
-        except requests.exceptions.Timeout:
-            logger.error(f"FreshRSS 认证超时 (>{self.timeout}秒)")
-            raise RuntimeError(f"FreshRSS 认证超时 (>{self.timeout}秒)")
-        except requests.exceptions.ConnectionError:
-            logger.error("无法连接到 FreshRSS 服务器")
-            raise RuntimeError("无法连接到 FreshRSS 服务器")
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"FreshRSS 认证失败: {e}")
-            raise RuntimeError(f"FreshRSS 认证失败: {e}")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"FreshRSS 认证请求错误: {e}")
-            raise RuntimeError(f"FreshRSS 认证请求错误: {e}")
+        
+        max_retries = 3
+        retry_delay = 1  # 秒
+        
+        for attempt in range(max_retries):
+            try:
+                resp = requests.get(self.auth_url, params=params, timeout=self.timeout)
+                resp.raise_for_status()
+                
+                for line in resp.text.splitlines():
+                    if line.startswith("Auth="):
+                        raw = line.split("=", 1)[1]
+                        logger.info("FreshRSS 认证成功")
+                        return f"GoogleLogin auth={raw}"
 
-        for line in resp.text.splitlines():
-            if line.startswith("Auth="):
-                raw = line.split("=", 1)[1]
-                logger.info("FreshRSS 认证成功")
-                return f"GoogleLogin auth={raw}"
-
-        logger.error("FreshRSS Auth token 未找到")
-        raise RuntimeError("FreshRSS Auth token 未找到")
+                logger.error("FreshRSS Auth token 未找到")
+                raise RuntimeError("FreshRSS Auth token 未找到")
+                
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    logger.warning(f"FreshRSS 认证超时，重试 {attempt + 1}/{max_retries - 1}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                logger.error(f"FreshRSS 认证超时 (>{self.timeout}秒)")
+                raise RuntimeError(f"FreshRSS 认证超时 (>{self.timeout}秒)")
+            except requests.exceptions.ConnectionError:
+                if attempt < max_retries - 1:
+                    logger.warning(f"FreshRSS 连接失败，重试 {attempt + 1}/{max_retries - 1}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                logger.error("无法连接到 FreshRSS 服务器")
+                raise RuntimeError("无法连接到 FreshRSS 服务器")
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"FreshRSS 认证失败: {e}")
+                raise RuntimeError(f"FreshRSS 认证失败，请检查凭证: {e}")
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"FreshRSS 认证请求错误，重试 {attempt + 1}/{max_retries - 1}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                logger.error(f"FreshRSS 认证请求错误: {e}")
+                raise RuntimeError(f"FreshRSS 认证请求错误: {e}")
 
     def get_news(self, hours: int, n: int | None = None):
         """
@@ -83,28 +106,44 @@ class RSSClient:
             "ot": timestamp,
         }
 
-        try:
-            resp = self.session.get(self.newsapi, params=params, timeout=self.timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            item_count = len(data.get("items", []))
-            logger.info(f"成功获取 {item_count} 条新闻")
-            return data
-        except requests.exceptions.Timeout:
-            logger.error(f"获取新闻超时 (>{self.timeout}秒)")
-            raise RuntimeError(f"获取新闻超时 (>{self.timeout}秒)")
-        except requests.exceptions.ConnectionError:
-            logger.error("无法连接到 FreshRSS 服务器")
-            raise RuntimeError("无法连接到 FreshRSS 服务器")
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"获取新闻失败: {e}")
-            raise RuntimeError(f"获取新闻失败: {e}")
-        except requests.exceptions.JSONDecodeError:
-            logger.error("FreshRSS 返回的数据格式错误")
-            raise RuntimeError("FreshRSS 返回的数据格式错误")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"获取新闻请求错误: {e}")
-            raise RuntimeError(f"获取新闻请求错误: {e}")
+        max_retries = 3
+        retry_delay = 1  # 秒
+        
+        for attempt in range(max_retries):
+            try:
+                resp = self.session.get(self.newsapi, params=params, timeout=self.timeout)
+                resp.raise_for_status()
+                data = resp.json()
+                item_count = len(data.get("items", []))
+                logger.info(f"成功获取 {item_count} 条新闻")
+                return data
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    logger.warning(f"获取新闻超时，重试 {attempt + 1}/{max_retries - 1}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                logger.error(f"获取新闻超时 (>{self.timeout}秒)")
+                raise RuntimeError(f"获取新闻超时 (>{self.timeout}秒)")
+            except requests.exceptions.ConnectionError:
+                if attempt < max_retries - 1:
+                    logger.warning(f"连接 FreshRSS 失败，重试 {attempt + 1}/{max_retries - 1}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                logger.error("无法连接到 FreshRSS 服务器")
+                raise RuntimeError("无法连接到 FreshRSS 服务器")
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"获取新闻失败: {e}")
+                raise RuntimeError(f"获取新闻失败: {e}")
+            except requests.exceptions.JSONDecodeError:
+                logger.error("FreshRSS 返回的数据格式错误")
+                raise RuntimeError("FreshRSS 返回的数据格式错误")
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"获取新闻请求错误，重试 {attempt + 1}/{max_retries - 1}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                logger.error(f"获取新闻请求错误: {e}")
+                raise RuntimeError(f"获取新闻请求错误: {e}")
 
     def get_24h_news(self):
         # 向后兼容旧调用
