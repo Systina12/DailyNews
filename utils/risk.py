@@ -37,10 +37,16 @@ def parse_risk_response(response_text):
             item_id = parts[0].strip()
             risk_level = parts[1].strip().lower()
 
+            # 验证 item_id 是数字
+            if not item_id.isdigit():
+                logger.warning(f"第 {line_num} 行编号无效（非数字）: {item_id}")
+                continue
+
             if risk_level in ['low', 'high']:
                 risk_map[item_id] = risk_level
             else:
-                logger.warning(f"第 {line_num} 行风险等级无效: {risk_level}")
+                logger.warning(f"第 {line_num} 行风险等级无效: {risk_level}，将标记为 high（保守策略）")
+                risk_map[item_id] = "high"  # 保守策略：未知风险视为高风险
         else:
             logger.warning(f"第 {line_num} 行格式错误: {line}")
 
@@ -67,11 +73,11 @@ def annotate_risk_levels(items, risk_map):
 
     for item in items:
         item_id = item.get("id", "").replace("H", "")  # 移除 H 前缀
-        risk_level = risk_map.get(item_id, "unknown")
+        risk_level = risk_map.get(item_id, "high")  # 默认为 high（保守策略）
 
-        if risk_level == "unknown":
+        if item_id not in risk_map:
             unknown_count += 1
-            logger.warning(f"新闻 {item.get('id')} (编号 {item_id}) 未找到风险标注")
+            logger.warning(f"新闻 {item.get('id')} (编号 {item_id}) 未找到风险标注，标记为 high（保守策略）")
         else:
             matched_count += 1
 
@@ -82,7 +88,7 @@ def annotate_risk_levels(items, risk_map):
     logger.info(f"标注完成 - 成功匹配: {matched_count}, 未匹配: {unknown_count}")
 
     if unknown_count > 0:
-        logger.warning(f"有 {unknown_count} 条新闻未找到风险标注，将标记为 unknown")
+        logger.warning(f"有 {unknown_count} 条新闻未找到风险标注，已标记为 high（保守策略）")
 
     return items_with_risk
 

@@ -113,18 +113,40 @@ def build_ds_risk_prompt(headline_block):
         return None
 
     # 格式化新闻条目
-    news_lines = [
-        f"{i + 1}. 标题：{_clean_text(item.get('title'))}\n"
-        f"   摘要：{_clean_text(_extract_summary(item))}"
-        for i, item in enumerate(news)
-    ]
+    news_lines = []
+    for i, item in enumerate(news):
+        title = _clean_text(item.get('title'))
+        summary = _clean_text(_extract_summary(item))
+        
+        # 验证标题和摘要不为空
+        if not title:
+            continue
+            
+        # 限制单条摘要长度（避免 prompt 过长）
+        if len(summary) > 1000:
+            summary = summary[:1000] + "..."
+        
+        news_lines.append(
+            f"{i + 1}. 标题：{title}\n"
+            f"   摘要：{summary}"
+        )
+
+    if not news_lines:
+        return None
 
     prompt = RISK_ASSESSMENT_TEMPLATE.format(
         news_items="\n\n".join(news_lines)
     )
+    
+    # 检查 prompt 总长度
+    if len(prompt) > 100000:  # 约 25k tokens
+        from utils.logger import get_logger
+        logger = get_logger("build_prompt")
+        logger.warning(f"风险评估 prompt 过长: {len(prompt)} 字符，可能需要分批处理")
+    
     return {
         "prompt": prompt,
-        "meta": {"count": len(news)}
+        "meta": {"count": len(news_lines)}
     }
 
 
@@ -164,9 +186,20 @@ def build_headline_prompt(input_block, risk_filter="low"):
         title = _clean_text(item.get("title"))
         summary = _clean_text(_extract_summary(item))
         link = item.get("link") or ""
+        
+        # 验证标题不为空
+        if not title:
+            continue
+        
+        # 限制单条摘要长度
+        if len(summary) > 1000:
+            summary = summary[:1000] + "..."
 
         refs.append({"n": idx, "title": title, "url": link})
         news_lines.append(f"【{idx}】\n标题：{title}\n摘要：{summary}\n")
+
+    if not news_lines:
+        return None
 
     category = input_block.get("category") or "头条"
 
@@ -175,6 +208,12 @@ def build_headline_prompt(input_block, risk_filter="low"):
         category=category,
         news_items="\n".join(news_lines)
     )
+    
+    # 检查 prompt 总长度
+    if len(prompt) > 100000:  # 约 25k tokens
+        from utils.logger import get_logger
+        logger = get_logger("build_prompt")
+        logger.warning(f"摘要生成 prompt 过长: {len(prompt)} 字符，可能需要分批处理")
 
     return {
         "section": "headline",
@@ -184,7 +223,7 @@ def build_headline_prompt(input_block, risk_filter="low"):
         "refs": refs,
         "meta": {
             "total": len(all_news),
-            "filtered": len(filtered_news),
+            "filtered": len(news_lines),
             "risk_filter": risk_filter,
         },
     }

@@ -39,7 +39,8 @@ class Settings:
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
 
     # API 超时配置
-    API_TIMEOUT = int(os.getenv("API_TIMEOUT", "60"))
+    _timeout = int(os.getenv("API_TIMEOUT", "60"))
+    API_TIMEOUT = _timeout if _timeout > 0 else 60
 
     # 数据目录
     DATA_DIR = BASE_DIR / "data"
@@ -59,13 +60,12 @@ class Settings:
 
     # SMTP配置（从环境变量读取）
     SMTP_HOST = os.getenv("SMTP_HOST", "")
-    SMTP_PORT = os.getenv("SMTP_PORT", "465")  # 先保留为字符串，使用时再 int()
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
     SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
     SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
     SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
     SMTP_FROM = os.getenv("SMTP_FROM", "")
-    #woshishabi
     SMTP_TO = os.getenv("SMTP_TO", "")  # 多个收件人用逗号分隔
 
     @classmethod
@@ -84,6 +84,14 @@ class Settings:
 
         if not cls.GEMINI_TOKEN:
             errors.append("GEMINI_TOKEN 未设置")
+
+        # 验证 FreshRSS 配置（如果需要使用）
+        if not cls.FRESHRSS_EMAIL or not cls.FRESHRSS_PASSWORD:
+            errors.append("FRESHRSS_EMAIL 或 FRESHRSS_PASSWORD 未设置")
+
+        # 验证超时配置
+        if cls.API_TIMEOUT <= 0:
+            errors.append(f"API_TIMEOUT 必须大于 0，当前值: {cls.API_TIMEOUT}")
 
         if errors:
             raise ValueError(f"配置错误: {', '.join(errors)}")

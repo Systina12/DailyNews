@@ -1,3 +1,4 @@
+import time
 import requests
 from google import genai
 from google.genai import types
@@ -7,6 +8,7 @@ from .exceptions import ContentFilteredException
 from utils.deepseek_check import check_deepseek_response
 from config import settings
 from utils.logger import get_logger
+from utils.rate_limiter import deepseek_limiter, gemini_limiter
 
 logger = get_logger("llms")
 
@@ -23,9 +25,14 @@ class LLMClient:
 
         logger.info(f"LLMClient 初始化完成，超时设置: {self.timeout}秒")
 
-    def request_deepseek(self, prompt: str, temperature: float = 0.7, max_tokens = 999999999) -> str:
+    def request_deepseek(self, prompt: str, temperature: float = 0.7, max_tokens: int = 4000) -> str:
         if not prompt:
             raise ValueError("prompt 不能为空")
+        
+        # 检查 prompt 长度（粗略估计：1 token ≈ 4 字符）
+        estimated_tokens = len(prompt) // 4
+        if estimated_tokens > 30000:  # DeepSeek 上下文限制
+            logger.warning(f"Prompt 过长，估计 {estimated_tokens} tokens，可能超过限制")
 
         headers = {
             "Authorization": f"Bearer {get_deepseek_token()}",
@@ -42,66 +49,108 @@ class LLMClient:
             "stream": False
         }
 
-        try:
-            response = requests.post(self.deepseek_api_url, headers=headers, json=data, timeout=self.timeout)
+        max_retries = 3
+        retry_delay = 1  # 秒
 
-            # 检查 HTTP 400 状态码
-            if response.status_code == 400:
-                raise ContentFilteredException("HTTP 400 状态码")
+        for attempt in range(max_retries):
+            # 应用速率限制
+            deepseek_limiter.acquire()
+            try:
+                response = requests.post(self.deepseek_api_url, headers=headers, json=data, timeout=self.timeout)
 
-            response.raise_for_status()
-            result = response.json()
-            content = result["choices"][0]["message"]["content"]
+                # 检查 HTTP 400 状态码（内容过滤）
+                if response.status_code == 400:
+                    raise ContentFilteredException("HTTP 400 状态码")
 
-            # 检查内容安全
-            check_result = check_deepseek_response(content, response.status_code)
-            if check_result["is_filtered"]:
-                raise ContentFilteredException(check_result["reason"])
+                response.raise_for_status()
+                result = response.json()
+                content = result["choices"][0]["message"]["content"]
 
-            return content
+                # 检查内容安全
+                check_result = check_deepseek_response(content, response.status_code)
+                if check_result["is_filtered"]:
+                    raise ContentFilteredException(check_result["reason"])
 
-        except ContentFilteredException:
-            raise
-        except requests.exceptions.Timeout:
-            raise RuntimeError(f"DeepSeek API 请求超时 (>{self.timeout}秒)")
-        except requests.exceptions.ConnectionError:
-            raise RuntimeError("无法连接到 DeepSeek API")
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 400:
-                raise ContentFilteredException(f"HTTP 400: {str(e)}")
-            raise RuntimeError(f"DeepSeek API 请求失败: {e}")
-        except requests.exceptions.JSONDecodeError:
-            raise RuntimeError("DeepSeek API 返回的数据格式错误")
-        except (KeyError, IndexError) as e:
-            raise RuntimeError(f"DeepSeek API 返回数据结构异常: {e}")
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"DeepSeek API 请求错误: {e}")
+                return content
 
-    def request_gemini(self, prompt: str, temperature: float = 0.7, max_tokens = 999999999) -> str:
+            except ContentFilteredException:
+                # 内容过滤不重试
+                raise
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    logger.warning(f"DeepSeek API 超时，重试 {attempt + 1}/{max_retries - 1}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                raise RuntimeError(f"DeepSeek API 请求超时 (>{self.timeout}秒)")
+            except requests.exceptions.ConnectionError:
+                if attempt < max_retries - 1:
+                    logger.warning(f"DeepSeek API 连接失败，重试 {attempt + 1}/{max_retries - 1}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                raise RuntimeError("无法连接到 DeepSeek API")
+            except requests.exceptions.HTTPError as e:
+                # HTTP 错误不重试（除了 5xx）
+                if e.response.status_code >= 500 and attempt < max_retries - 1:
+                    logger.warning(f"DeepSeek API 服务器错误，重试 {attempt + 1}/{max_retries - 1}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                raise RuntimeError(f"DeepSeek API 请求失败: {e}")
+            except requests.exceptions.JSONDecodeError:
+                raise RuntimeError("DeepSeek API 返回的数据格式错误")
+            except (KeyError, IndexError) as e:
+                raise RuntimeError(f"DeepSeek API 返回数据结构异常: {e}")
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"DeepSeek API 请求错误，重试 {attempt + 1}/{max_retries - 1}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                raise RuntimeError(f"DeepSeek API 请求错误: {e}")
+
+    def request_gemini(self, prompt: str, temperature: float = 0.7, max_tokens: int = 4000) -> str:
         if not prompt:
             raise ValueError("prompt 不能为空")
+        
+        # 检查 prompt 长度
+        estimated_tokens = len(prompt) // 4
+        if estimated_tokens > 1000000:  # Gemini 2.0 上下文限制
+            logger.warning(f"Prompt 过长，估计 {estimated_tokens} tokens，可能超过限制")
 
-        try:
-            # 生成内容
-            response = self.gemini_client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-            )
+        max_retries = 3
+        retry_delay = 1  # 秒
 
-            return response.text
+        for attempt in range(max_retries):
+            # 应用速率限制
+            gemini_limiter.acquire()
+            try:
+                # 生成内容
+                response = self.gemini_client.models.generate_content(
+                    model=settings.GEMINI_MODEL,
+                    contents=prompt,
+                )
 
-        except Exception as e:
-            error_msg = str(e)
+                return response.text
 
-            # 处理常见错误类型
-            if "timeout" in error_msg.lower():
-                raise RuntimeError(f"Gemini API 请求超时 (>{self.timeout}秒)")
-            elif "connection" in error_msg.lower():
-                raise RuntimeError("无法连接到 Gemini API")
-            elif "api key" in error_msg.lower() or "authentication" in error_msg.lower():
-                raise RuntimeError("Gemini API 认证失败，请检查 API Key")
-            else:
-                raise RuntimeError(f"Gemini API 请求错误: {error_msg}")
+            except Exception as e:
+                error_msg = str(e).lower()
+
+                # 认证错误不重试
+                if "api key" in error_msg or "authentication" in error_msg:
+                    raise RuntimeError("Gemini API 认证失败，请检查 API Key")
+
+                # 可重试的错误
+                if attempt < max_retries - 1:
+                    if "timeout" in error_msg or "connection" in error_msg or "503" in error_msg or "500" in error_msg:
+                        logger.warning(f"Gemini API 临时错误，重试 {attempt + 1}/{max_retries - 1}: {error_msg}")
+                        time.sleep(retry_delay * (attempt + 1))
+                        continue
+
+                # 最后一次尝试失败或不可重试的错误
+                if "timeout" in error_msg:
+                    raise RuntimeError(f"Gemini API 请求超时 (>{self.timeout}秒)")
+                elif "connection" in error_msg:
+                    raise RuntimeError("无法连接到 Gemini API")
+                else:
+                    raise RuntimeError(f"Gemini API 请求错误: {str(e)}")
 
     def request_with_fallback(self, prompt: str, temperature: float = 0.7, max_tokens: int = 2000, primary: str = "deepseek"):
         """

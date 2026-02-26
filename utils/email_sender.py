@@ -27,12 +27,11 @@ def send_html_email(subject: str, html_body: str):
         raise ValueError("html_body 不能为空")
 
     host = getattr(settings, "SMTP_HOST", None)
-    port = int(getattr(settings, "SMTP_PORT", 0) or 0)
+    port = getattr(settings, "SMTP_PORT", 0)
     username = getattr(settings, "SMTP_USERNAME", "")
     password = getattr(settings, "SMTP_PASSWORD", "")
     mail_from = getattr(settings, "SMTP_FROM", "")
     mail_to = _parse_recipients(getattr(settings, "SMTP_TO", ""))
-
 
     if not host or not port:
         raise ValueError("SMTP_HOST/SMTP_PORT 未配置")
@@ -55,9 +54,12 @@ def send_html_email(subject: str, html_body: str):
             server.login(username, password)
         server.send_message(msg)
         logger.info("邮件发送成功")
+    except Exception as e:
+        logger.error(f"邮件发送失败: {e}")
+        raise
     finally:
         if server:
             try:
                 server.quit()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"关闭 SMTP 连接时出错: {e}")

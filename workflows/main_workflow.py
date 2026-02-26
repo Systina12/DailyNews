@@ -96,10 +96,13 @@ def run_main_workflow(categories=None, hours: int = 24):
         filename = f"summary_{safe_cat}_{date_str}_{run_ts}.html"
         out_path = os.path.join(str(settings.DATA_DIR), filename)
 
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(merged_summary)
-
-        logger.info(f"分类 [{category}] 输出文件: {out_path}")
+        try:
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(merged_summary)
+            logger.info(f"分类 [{category}] 输出文件: {out_path}")
+        except IOError as e:
+            logger.error(f"写入文件失败: {out_path}, 错误: {e}")
+            raise RuntimeError(f"写入文件失败: {e}")
         results.append(
             {
                 "category": category,
@@ -109,9 +112,12 @@ def run_main_workflow(categories=None, hours: int = 24):
         )
 
         # ✅ 发送邮件：标题不带日期，只要小时
-        subject = f"{hour_cn}-{category}"
-        send_html_email(subject=subject, html_body=merged_summary)
-        logger.info(f"分类 [{category}] 邮件已发送，subject={subject}")
+        try:
+            subject = f"{hour_cn}-{category}"
+            send_html_email(subject=subject, html_body=merged_summary)
+            logger.info(f"分类 [{category}] 邮件已发送，subject={subject}")
+        except Exception as e:
+            logger.warning(f"分类 [{category}] 邮件发送失败: {e}，继续处理其他任务")
 
     # 5) 打印指标摘要
     metrics.print_summary()
