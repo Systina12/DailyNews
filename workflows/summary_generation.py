@@ -154,25 +154,28 @@ def run_summary_generation_pipeline(risk_annotated_data):
     # 低/高风险各自 refs 编号从 1 开始；合并时高风险引用会被平移
     all_refs = []
     offset = 0
+    
+    # 添加低风险引用（编号不变）
     if low_refs:
+        all_refs.extend(low_refs)
+        # 计算偏移量：低风险最大编号
         offset = max(r.get("n", 0) for r in low_refs if isinstance(r.get("n"), int)) or 0
-    all_refs.extend(low_refs)
 
+    # 添加高风险引用（编号需要加上偏移）
     if high_refs:
-        shifted_high_refs = []
         for r in high_refs:
             n = r.get("n")
             if isinstance(n, int):
                 shifted = dict(r)
                 shifted["n"] = n + offset
-                shifted_high_refs.append(shifted)
+                all_refs.append(shifted)
             else:
-                shifted_high_refs.append(r)
-        all_refs.extend(shifted_high_refs)
+                all_refs.append(r)
 
+    # 替换链接
     merged_summary = process_summary_links(merged_summary, all_refs)
 
-    # 分开版本也替换链接
+    # 分开版本也替换链接（使用原始编号）
     low_risk_summary = process_summary_links(low_risk_summary, low_refs) if low_risk_summary else ""
     high_risk_summary = process_summary_links(high_risk_summary, high_refs) if high_risk_summary else ""
 
