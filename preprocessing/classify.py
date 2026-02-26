@@ -143,6 +143,28 @@ class Classify:
         # 5. 国际（兜底）
         return "国际"
 
+    def _process_headlines(self, items):
+        """
+        处理头条新闻：硬排除 → 分类 → 筛选出指定类别的新闻
+        """
+        result = []
+        for item in items:
+            # 1. 硬排除
+            if self._is_hard_excluded(item):
+                continue
+            
+            # 2. 分类
+            predicted_category = self._classify_item(item)
+            
+            # 3. 筛选：只保留当前分类器指定的类别
+            if predicted_category == self.category:
+                result.append(item)
+        
+        return {
+            "section": "headline",
+            "items": result
+        }
+
 
 class ClassifyRussia(Classify):
     """
@@ -212,4 +234,3 @@ class ClassifyRussia(Classify):
             "section": "headline",
             "items": result
         }
-
