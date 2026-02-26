@@ -18,7 +18,15 @@ def parse_risk_response(response_text):
     """
     risk_map = {}
 
+    if not response_text:
+        logger.error("风险响应为空")
+        return risk_map
+
     logger.debug(f"开始解析风险响应，原始文本长度: {len(response_text)}")
+    
+    # 记录原始响应的前500字符用于调试
+    preview = response_text[:500] if len(response_text) > 500 else response_text
+    logger.debug(f"响应预览: {preview}")
 
     lines = response_text.strip().split('\n')
     logger.debug(f"分割后共 {len(lines)} 行")
@@ -26,6 +34,10 @@ def parse_risk_response(response_text):
     for line_num, line in enumerate(lines, 1):
         line = line.strip()
         if not line:
+            continue
+
+        # 跳过可能的markdown代码块标记
+        if line.startswith('```'):
             continue
 
         if ':' not in line:
@@ -51,6 +63,10 @@ def parse_risk_response(response_text):
             logger.warning(f"第 {line_num} 行格式错误: {line}")
 
     logger.info(f"解析完成，识别 {len(risk_map)} 条风险标注")
+    
+    if len(risk_map) == 0:
+        logger.error("未能解析出任何有效的风险标注！")
+    
     return risk_map
 
 
@@ -71,15 +87,35 @@ def annotate_risk_levels(items, risk_map):
 
     logger.debug(f"开始标注风险等级，共 {len(items)} 条新闻，risk_map 包含 {len(risk_map)} 条标注")
 
-    for item in items:
-        item_id = item.get("id", "").replace("H", "")  # 移除 H 前缀
-        risk_level = risk_map.get(item_id, "high")  # 默认为 high（保守策略）
+    # 如果risk_map为空，所有新闻标记为高风险
+    if not risk_map:
+        logger.warning("risk_map 为空，将所有新闻标记为 high（保守策略）")
+        for item in items:
+            item_copy = item.copy()
+            item_copy["ds_risk"] = "high"
+            items_with_risk.append(item_copy)
+        return items_with_risk
 
-        if item_id not in risk_map:
-            unknown_count += 1
-            logger.warning(f"新闻 {item.get('id')} (编号 {item_id}) 未找到风险标注，标记为 high（保守策略）")
-        else:
+    for idx, item in enumerate(items, start=1):
+        # 尝试多种方式匹配ID
+        item_id_raw = item.get("id", "")
+        item_id = item_id_raw.replace("H", "")  # 移除 H 前缀
+        
+        # 尝试使用索引匹配（从1开始）
+        idx_str = str(idx)
+        
+        # 优先使用item_id，如果不存在则使用索引
+        if item_id and item_id in risk_map:
+            risk_level = risk_map[item_id]
             matched_count += 1
+        elif idx_str in risk_map:
+            risk_level = risk_map[idx_str]
+            matched_count += 1
+            logger.debug(f"新闻 {item_id_raw} 使用索引 {idx_str} 匹配到风险等级")
+        else:
+            risk_level = "high"  # 默认为 high（保守策略）
+            unknown_count += 1
+            logger.warning(f"新闻 {item_id_raw} (编号 {item_id}, 索引 {idx_str}) 未找到风险标注，标记为 high（保守策略）")
 
         item_copy = item.copy()
         item_copy["ds_risk"] = risk_level

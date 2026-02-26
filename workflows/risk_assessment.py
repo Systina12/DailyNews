@@ -57,12 +57,32 @@ def run_risk_assessment_pipeline(classified_data):
     # 3. 请求 Gemini
     logger.info("请求 Gemini 进行风险评估...")
     llm_client = LLMClient()
-    response = llm_client.request_gemini(
-        prompt=prompt_data["prompt"],
-        temperature=0.1,
-        max_tokens=1000
-    )
-    logger.info("✓ Gemini 响应成功")
+    try:
+        response = llm_client.request_gemini(
+            prompt=prompt_data["prompt"],
+            temperature=0.1,
+            max_tokens=1000
+        )
+        logger.info("✓ Gemini 响应成功")
+    except Exception as e:
+        logger.error(f"Gemini 风险评估失败: {e}")
+        # 失败时标记所有新闻为高风险（保守策略）
+        logger.warning("风险评估失败，将所有新闻标记为高风险")
+        items_with_risk = []
+        for item in classified.get("items", []):
+            item_copy = item.copy()
+            item_copy["ds_risk"] = "high"
+            items_with_risk.append(item_copy)
+        
+        out = {
+            "section": classified.get("section"),
+            "items": items_with_risk
+        }
+        if category:
+            out["category"] = category
+        if date_str:
+            out["dateStr"] = date_str
+        return out
 
     # 4. 解析风险评分
     logger.info("解析风险评分...")
