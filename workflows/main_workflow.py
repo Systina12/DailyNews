@@ -37,7 +37,7 @@ def run_main_workflow(categories=None, hours: int = 24):
     settings.ensure_directories()
     settings.validate()
 
-    default_categories = ["头条", "政治", "财经", "科技"]  # , "国际"
+    default_categories = ["头条", "政治", "财经", "科技" , "国际"]
     categories = categories or default_categories
 
     # 用“精确到秒”的时间戳做本次运行的输出文件后缀

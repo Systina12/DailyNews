@@ -6,7 +6,7 @@ from preprocessing.dedupe import dedupe_items
 from preprocessing.classify import Classify
 
 
-DEFAULT_CATEGORIES = ["头条", "政治", "财经", "科技",]  # 你之前 main_workflow 里也是这几类（国际已注释）
+DEFAULT_CATEGORIES = ["头条", "政治", "财经", "科技","国际"]  # 你之前 main_workflow 里也是这几类（国际已注释）
 
 
 def run_news_pipeline(category: str = "头条", hours: int = 24):
