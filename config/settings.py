@@ -68,6 +68,11 @@ class Settings:
     SMTP_FROM = os.getenv("SMTP_FROM", "")
     SMTP_TO = os.getenv("SMTP_TO", "")  # 多个收件人用逗号分隔
 
+    low_water = int(os.getenv("INTL_KEEP_LOW_WATERMARK", "10"))  # 少于等于这个数：全留
+    ratio = float(os.getenv("INTL_KEEP_RATIO", "0.2"))  # 多的时候：按比例留
+    min_keep = int(os.getenv("INTL_MIN_KEEP", "10"))  # 下限
+    max_keep = int(os.getenv("INTL_MAX_KEEP", "50"))  # 上限
+
     @classmethod
     def ensure_directories(cls):
         """确保必要的目录存在"""
