@@ -38,7 +38,7 @@ class Settings:
     GEMINI_TOKEN = os.getenv("GEMINI_TOKEN", "")
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
     # Gemini Flash 便宜模型（用于分类和风险评估）
-    GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-1.5-flash-8b")
+    GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash-lite")
 
     # API 超时配置
     _timeout = int(os.getenv("API_TIMEOUT", "60"))
