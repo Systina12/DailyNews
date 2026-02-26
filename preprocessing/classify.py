@@ -147,8 +147,26 @@ class Classify:
 class ClassifyRussia(Classify):
     """
     俄罗斯新闻分类器
-    用于处理包含俄罗斯新闻的分类逻辑。
+    用于处理包含俄罗斯新闻的分类逻辑，并进行关键词去噪音
     """
+
+    # 噪音关键词黑名单（娱乐、体育、生活类）
+    NOISE_KEYWORDS = [
+        "horoscope", "astrology", "celebrity", "gossip", "recipe", "travel", "tourism",
+        "fashion", "beauty", "quiz", "podcast", "movie", "film", "music", "tv", "show",
+        "football", "hockey", "match", "tournament", "weather", "sport",
+        "星座", "八卦", "明星", "娱乐", "美食", "菜谱", "旅游", "体育", "比赛", "天气",
+        "гороскоп", "астрол", "рецеп", "путеше", "туризм", "спорт", "футбол", "хокке", "погода",
+    ]
+
+    def _is_noise(self, item):
+        """判断是否为噪音内容（娱乐、体育、生活等）"""
+        title = (item.get("title") or "").lower()
+        summary = (item.get("summaryText") or "").lower()
+
+        # 检查标题和摘要中是否包含噪音关键词
+        text = f"{title} {summary}"
+        return any(kw in text for kw in self.NOISE_KEYWORDS)
 
     def _classify_item(self, item):
         """
@@ -159,14 +177,39 @@ class ClassifyRussia(Classify):
         categories = item.get("categories", [])
         cats = " ".join(str(c).lower() for c in categories)
 
-        # 特别处理俄罗斯新闻标签，直接进行分类
+        # 特别处理俄罗斯新闻标签
         if "label/俄罗斯" in cats or "россия" in src:
-            return "国际"  # 可以根据需要改变类别
+            return "俄罗斯"
 
-        # 如果新闻来自俄罗斯来源，或涉及俄罗斯相关事务，判定为“国际”或其他
-        russian_keywords = ["russia", "россия", "putin", "путин", "kremlin", "кремл"]
+        # 如果新闻来自俄罗斯来源，或涉及俄罗斯相关事务
+        russian_keywords = ["russia", "russian", "putin", "путин", "kremlin", "кремл", "moscow", "москв"]
         if any(kw in title for kw in russian_keywords):
-            return "国际"  # 可以根据内容调整分类逻辑
+            return "俄罗斯"
 
         # 调用父类的方法，如果新闻没涉及俄罗斯，按父类规则分类
         return super()._classify_item(item)
+
+    def _process_headlines(self, items):
+        """
+        处理俄罗斯新闻：硬排除 → 去噪音 → 分类 → 筛选
+        """
+        result = []
+        for item in items:
+            # 1. 硬排除
+            if self._is_hard_excluded(item):
+                continue
+
+            # 2. 分类
+            predicted_category = self._classify_item(item)
+
+            # 3. 筛选：只保留俄罗斯分类的新闻
+            if predicted_category == self.category:
+                # 4. 去噪音：过滤掉娱乐、体育等内容
+                if not self._is_noise(item):
+                    result.append(item)
+
+        return {
+            "section": "headline",
+            "items": result
+        }
+

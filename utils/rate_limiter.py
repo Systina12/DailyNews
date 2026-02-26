@@ -36,6 +36,7 @@ class RateLimiter:
 
         这个方法会阻塞直到可以进行调用
         """
+        sleep_time = 0
         with self.lock:
             now = time.time()
 
@@ -50,8 +51,6 @@ class RateLimiter:
                     logger.debug(f"达到速率限制，等待 {sleep_time:.2f} 秒")
                 else:
                     sleep_time = 0
-            else:
-                sleep_time = 0
 
             # 记录本次调用
             self.calls.append(now)
