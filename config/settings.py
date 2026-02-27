@@ -89,6 +89,13 @@ class Settings:
     # 分类置信度阈值（高于此值使用规则分类，低于此值使用 LLM）
     CLASSIFY_CONFIDENCE_THRESHOLD = float(os.getenv("CLASSIFY_CONFIDENCE_THRESHOLD", "0.75"))
 
+    # 头条排序配置
+    HEADLINE_ENABLE_LLM_SCORING = os.getenv("HEADLINE_ENABLE_LLM_SCORING", "true").lower() == "true"
+    HEADLINE_ENABLE_LEARNING = os.getenv("HEADLINE_ENABLE_LEARNING", "true").lower() == "true"
+    HEADLINE_BLACKLIST_MAX_SIZE = int(os.getenv("HEADLINE_BLACKLIST_MAX_SIZE", "100"))  # 最多100个关键词
+    HEADLINE_BLACKLIST_MIN_FREQ = float(os.getenv("HEADLINE_BLACKLIST_MIN_FREQ", "0.3"))  # 最低频率0.3
+    HEADLINE_BLACKLIST_DECAY = float(os.getenv("HEADLINE_BLACKLIST_DECAY", "0.95"))  # 衰减因子0.95
+
     @classmethod
     def ensure_directories(cls):
         """确保必要的目录存在"""
