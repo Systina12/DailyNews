@@ -197,13 +197,13 @@ class Classify:
         # 5. 国际（兜底）
         return "国际", 0.4  # 兜底分类，置信度低
 
-    def _batch_classify_with_llm(self, items: List[Dict], batch_size: int = 20) -> List[Dict]:
+    def _batch_classify_with_llm(self, items: List[Dict], batch_size: int = 100) -> List[Dict]:
         """
         使用 LLM 批量分类新闻
         
         Args:
             items: 待分类的新闻列表
-            batch_size: 每批处理的新闻数量
+            batch_size: 每批处理的新闻数量（Gemini 2.5 Flash Lite 支持 100 万 token 上下文）
             
         Returns:
             List[Dict]: 分类结果列表，每项包含 {'category': str, 'is_noise': bool}
