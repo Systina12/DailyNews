@@ -87,7 +87,10 @@ class Settings:
     HEADLINE_MIN_KEEP = int(os.getenv("HEADLINE_MIN_KEEP", "8"))  # 最少保留 8 条
 
     # 分类置信度阈值（高于此值使用规则分类，低于此值使用 LLM）
-    CLASSIFY_CONFIDENCE_THRESHOLD = float(os.getenv("CLASSIFY_CONFIDENCE_THRESHOLD", "0.75"))
+    # 优化：从0.75降到0.60，减少LLM调用（规则分类准确率足够高）
+    # 参考：https://www.evidentlyai.com/classification-metrics/classification-threshold
+    # 成本影响：预计减少30-40%的分类LLM调用
+    CLASSIFY_CONFIDENCE_THRESHOLD = float(os.getenv("CLASSIFY_CONFIDENCE_THRESHOLD", "0.60"))
 
     # 头条排序配置
     HEADLINE_ENABLE_LLM_SCORING = os.getenv("HEADLINE_ENABLE_LLM_SCORING", "true").lower() == "true"
@@ -95,6 +98,13 @@ class Settings:
     HEADLINE_BLACKLIST_MAX_SIZE = int(os.getenv("HEADLINE_BLACKLIST_MAX_SIZE", "100"))  # 最多100个关键词
     HEADLINE_BLACKLIST_MIN_FREQ = float(os.getenv("HEADLINE_BLACKLIST_MIN_FREQ", "0.3"))  # 最低频率0.3
     HEADLINE_BLACKLIST_DECAY = float(os.getenv("HEADLINE_BLACKLIST_DECAY", "0.95"))  # 衰减因子0.95
+    
+    # 批量处理优化配置
+    # Gemini 2.5 Flash Lite支持1M tokens上下文窗口，可以处理更大批次
+    # 风险评估prompt更简单，可以增加批次大小
+    RISK_BATCH_SIZE = int(os.getenv("RISK_BATCH_SIZE", "200"))  # 从隐式100增加到200
+    CLASSIFY_BATCH_SIZE = int(os.getenv("CLASSIFY_BATCH_SIZE", "100"))  # 保持100
+    SCORING_BATCH_SIZE = int(os.getenv("SCORING_BATCH_SIZE", "100"))  # 保持100
 
     @classmethod
     def ensure_directories(cls):

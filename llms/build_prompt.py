@@ -113,12 +113,13 @@ HEADLINE_TEMPLATE = """你是一名严谨的新闻编辑，请用中文撰写栏
 
 # ========== Prompt 构建函数 ==========
 
-def build_ds_risk_prompt(headline_block):
+def build_ds_risk_prompt(headline_block, max_items=None):
     """
     构建 DeepSeek 风险评估 prompt
 
     Args:
         headline_block: 包含 section 和 items 的新闻数据块
+        max_items: 最大新闻条数（用于批量处理优化），默认None表示不限制
 
     Returns:
         dict: 包含 prompt 和 meta 信息，如果输入无效则返回 None
@@ -129,6 +130,13 @@ def build_ds_risk_prompt(headline_block):
     news = headline_block.get("items", [])
     if not news:
         return None
+    
+    # 批量处理优化：限制单批最大条数
+    if max_items and len(news) > max_items:
+        from utils.logger import get_logger
+        logger = get_logger("build_prompt")
+        logger.warning(f"新闻数量 {len(news)} 超过批次限制 {max_items}，将被截断")
+        news = news[:max_items]
 
     # 格式化新闻条目
     news_lines = []
@@ -141,8 +149,9 @@ def build_ds_risk_prompt(headline_block):
             continue
             
         # 限制单条摘要长度（避免 prompt 过长）
-        if len(summary) > 1000:
-            summary = summary[:1000] + "..."
+        # 风险评估prompt更简单，可以保留更多摘要内容
+        if len(summary) > 1500:
+            summary = summary[:1500] + "..."
         
         news_lines.append(
             f"{i + 1}. 标题：{title}\n"
@@ -156,11 +165,12 @@ def build_ds_risk_prompt(headline_block):
         news_items="\n\n".join(news_lines)
     )
     
-    # 检查 prompt 总长度
-    if len(prompt) > 100000:  # 约 25k tokens
+    # 检查 prompt 总长度（Gemini 2.5 Flash Lite支持1M tokens）
+    # 约4字符=1token，所以400万字符≈1M tokens
+    if len(prompt) > 400000:  # 约100k tokens，留足够余量
         from utils.logger import get_logger
         logger = get_logger("build_prompt")
-        logger.warning(f"风险评估 prompt 过长: {len(prompt)} 字符，可能需要分批处理")
+        logger.warning(f"风险评估 prompt 过长: {len(prompt)} 字符（约{len(prompt)//4} tokens），接近上限")
     
     return {
         "prompt": prompt,

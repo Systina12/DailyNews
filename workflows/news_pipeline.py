@@ -189,8 +189,9 @@ def _score_with_llm(items, llm_client):
     if not items:
         return []
     
+    from config import settings
+    batch_size = settings.SCORING_BATCH_SIZE  # 使用配置的批次大小
     results = []
-    batch_size = 100  # Gemini 2.5 Flash Lite 支持 100 万 token 上下文
     
     for i in range(0, len(items), batch_size):
         batch = items[i:i+batch_size]
@@ -218,7 +219,7 @@ def _score_with_llm(items, llm_client):
         prompt += "示例：\n1|85\n2|45\n3|15\n\n严格按照格式输出："
         
         try:
-            logger.info(f"LLM 评分 {len(batch)} 条新闻...")
+            logger.info(f"LLM 评分 {len(batch)} 条新闻（批次大小: {batch_size}）...")
             response = llm_client.request_gemini_flash(
                 prompt=prompt,
                 temperature=0.1,
