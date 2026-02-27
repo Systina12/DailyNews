@@ -190,7 +190,7 @@ def _score_with_llm(items, llm_client):
         return []
     
     results = []
-    batch_size = 20
+    batch_size = 100  # Gemini 2.5 Flash Lite 支持 100 万 token 上下文
     
     for i in range(0, len(items), batch_size):
         batch = items[i:i+batch_size]
