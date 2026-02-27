@@ -523,11 +523,13 @@ def _apply_headline_limit(headline_items, hours: int):
 
 def _apply_secondary_category_limit(items, category: str, hours: int):
     """
-    对次级分类（政治/财经/科技）应用水位线
+    对次级分类（政治/财经/科技）应用智能水位线
     
     策略：
-    - 相对宽松，允许更多新闻
-    - 使用头条的 1.5 倍水位线
+    - 数量少的栏目不削减（避免过度削减科技等小栏目）
+    - 数量 ≤ 低水位：全部保留
+    - 低水位 < 数量 ≤ 最大值：保留 60%，但至少保留最大值的 60%
+    - 数量 > 最大值：保留 60%，但至少保留最大值的 80%
     
     Args:
         items: 新闻列表
@@ -544,18 +546,42 @@ def _apply_secondary_category_limit(items, category: str, hours: int):
     low_watermark = int(headline_low * 1.5)
     max_keep = int(headline_max * 1.5)
     
+    # 情况1：数量 ≤ 低水位，全部保留
     if total <= low_watermark:
         logger.info(f"[{category}] 数量 {total} ≤ 低水位 {low_watermark}，全部保留")
         return items, []
     
-    # 按比例保留（60%）
-    keep_count = int(total * 0.6)
-    keep_count = max(10, min(keep_count, max_keep))
+    # 计算保留数量
+    keep_ratio = 0.6
+    keep_count = int(total * keep_ratio)
     
-    logger.info(
-        f"[{category}] 数量 {total} > 低水位 {low_watermark}，"
-        f"保留 {keep_count} 条，下放 {total - keep_count} 条到国际"
-    )
+    # 情况2：低水位 < 数量 ≤ 最大值
+    if total <= max_keep:
+        # 至少保留最大值的 60%
+        min_keep = int(max_keep * 0.6)
+        keep_count = max(keep_count, min_keep)
+        
+        if keep_count >= total:
+            # 削减后反而更多，说明数量本来就少，全部保留
+            logger.info(f"[{category}] 数量 {total} 适中，全部保留")
+            return items, []
+        
+        logger.info(
+            f"[{category}] 数量 {total}（适中），"
+            f"保留 {keep_count} 条（至少 {min_keep}），下放 {total - keep_count} 条"
+        )
+    
+    # 情况3：数量 > 最大值
+    else:
+        # 至少保留最大值的 80%，但不超过最大值
+        min_keep = int(max_keep * 0.8)
+        keep_count = max(keep_count, min_keep)
+        keep_count = min(keep_count, max_keep)  # 不超过最大值
+        
+        logger.info(
+            f"[{category}] 数量 {total}（超出最大值 {max_keep}），"
+            f"保留 {keep_count} 条（至少 {min_keep}，不超过 {max_keep}），下放 {total - keep_count} 条"
+        )
     
     # 简单按时间排序（最新的在前）
     sorted_items = sorted(items, key=lambda x: x.get("published", 0), reverse=True)
@@ -568,11 +594,12 @@ def _apply_secondary_category_limit(items, category: str, hours: int):
 
 def _apply_international_limit(items, hours: int):
     """
-    对国际分类应用水位线（兜底分类）
+    对国际分类应用智能水位线（兜底分类）
     
     策略：
-    - 使用与头条相同的水位线
-    - 超过水位线的直接丢弃
+    - 数量 ≤ 低水位：全部保留
+    - 低水位 < 数量 ≤ 最大值：保留 60%，但至少保留最大值的 60%
+    - 数量 > 最大值：保留 60%，但至少保留最大值的 80%
     
     Args:
         items: 新闻列表
@@ -586,18 +613,42 @@ def _apply_international_limit(items, hours: int):
     # 使用与头条相同的水位线
     low_watermark, max_keep = _calculate_headline_limits(hours)
     
+    # 情况1：数量 ≤ 低水位，全部保留
     if total <= low_watermark:
         logger.info(f"[国际] 数量 {total} ≤ 低水位 {low_watermark}，全部保留")
         return items
     
-    # 按比例保留（60%）
-    keep_count = int(total * 0.6)
-    keep_count = max(8, min(keep_count, max_keep))
+    # 计算保留数量
+    keep_ratio = 0.6
+    keep_count = int(total * keep_ratio)
     
-    logger.info(
-        f"[国际] 数量 {total} > 低水位 {low_watermark}，"
-        f"保留 {keep_count} 条，丢弃 {total - keep_count} 条"
-    )
+    # 情况2：低水位 < 数量 ≤ 最大值
+    if total <= max_keep:
+        # 至少保留最大值的 60%
+        min_keep = int(max_keep * 0.6)
+        keep_count = max(keep_count, min_keep)
+        
+        if keep_count >= total:
+            # 削减后反而更多，说明数量本来就少，全部保留
+            logger.info(f"[国际] 数量 {total} 适中，全部保留")
+            return items
+        
+        logger.info(
+            f"[国际] 数量 {total}（适中），"
+            f"保留 {keep_count} 条（至少 {min_keep}），丢弃 {total - keep_count} 条"
+        )
+    
+    # 情况3：数量 > 最大值
+    else:
+        # 至少保留最大值的 80%，但不超过最大值
+        min_keep = int(max_keep * 0.8)
+        keep_count = max(keep_count, min_keep)
+        keep_count = min(keep_count, max_keep)  # 不超过最大值
+        
+        logger.info(
+            f"[国际] 数量 {total}（超出最大值 {max_keep}），"
+            f"保留 {keep_count} 条（至少 {min_keep}，不超过 {max_keep}），丢弃 {total - keep_count} 条"
+        )
     
     # 简单按时间排序（最新的在前）
     sorted_items = sorted(items, key=lambda x: x.get("published", 0), reverse=True)
