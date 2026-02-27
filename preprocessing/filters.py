@@ -81,10 +81,16 @@ def _score_russia(item: Dict[str, Any], whitelist: List[str], blacklist: List[st
 
 def filter_ru(data: Dict[str, Any]) -> Dict[str, Any]:
     """
+    俄罗斯新闻过滤策略
+    
+    俄罗斯源是"大一统"源，包含政治、经济、娱乐、体育等所有内容。
+    需要激进的黑名单过滤，去掉垃圾内容，保留高质量新闻。
+    过滤后的新闻会并入正常分类流程（政治/财经/科技/国际）。
+    
     RUSSIA_FILTER_POLICY:
-      - exclude: 旧行为，直接删除俄罗斯
-      - include: 不处理
-      - denoise: 保留但降噪（默认）
+      - exclude: 直接删除所有俄罗斯新闻
+      - include: 保留所有，不做任何过滤
+      - aggressive (默认): 激进黑名单过滤
     """
     items = data.get("items", [])
     if not isinstance(items, list) or not items:
@@ -92,45 +98,42 @@ def filter_ru(data: Dict[str, Any]) -> Dict[str, Any]:
         out["items"] = []
         return out
 
-    policy = os.getenv("RUSSIA_FILTER_POLICY", "denoise").strip().lower()
+    policy = os.getenv("RUSSIA_FILTER_POLICY", "aggressive").strip().lower()
 
     if policy == "include":
+        # 完全不过滤
         out = dict(data)
         out["items"] = [it for it in items if isinstance(it, dict)]
         return out
 
     if policy == "exclude":
+        # 删除所有俄罗斯新闻
         kept = [it for it in items if isinstance(it, dict) and not _is_russia(it)]
         out = dict(data)
         out["items"] = kept
         return out
 
-    # denoise
-    max_keep = int(os.getenv("RUSSIA_DENOISE_MAX_KEEP", "60"))
-    min_score = int(os.getenv("RUSSIA_DENOISE_MIN_SCORE", "1"))
-
+    # aggressive (默认): 激进黑名单过滤
+    # 俄罗斯源是大杂烩，需要严格过滤
     blacklist = [x.lower() for x in (DEFAULT_BLACKLIST + _parse_csv_env("RUSSIA_DENOISE_BLACKLIST"))]
-    whitelist = [x.lower() for x in (DEFAULT_WHITELIST + _parse_csv_env("RUSSIA_DENOISE_WHITELIST"))]
 
     non_ru = [it for it in items if isinstance(it, dict) and not _is_russia(it)]
     ru = [it for it in items if isinstance(it, dict) and _is_russia(it)]
 
-    scored: List[Tuple[int, int, Dict[str, Any]]] = []
+    # 激进过滤：只要包含黑名单关键词就丢弃
+    ru_filtered = []
     for it in ru:
-        score = _score_russia(it, whitelist=whitelist, blacklist=blacklist)
-        if score < min_score:
+        text = _item_text(it)
+        # 黑名单过滤
+        if any(bad in text for bad in blacklist):
             continue
-        try:
-            published = int(it.get("published") or 0)
-        except Exception:
-            published = 0
-        scored.append((score, published, it))
-
-    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    ru_kept = [it for _, _, it in scored[:max_keep]]
+        # 标题太短（<40字符）通常是垃圾
+        if len(text.strip()) < 40:
+            continue
+        ru_filtered.append(it)
 
     out = dict(data)
-    out["items"] = non_ru + ru_kept
+    out["items"] = non_ru + ru_filtered
     return out
 
 

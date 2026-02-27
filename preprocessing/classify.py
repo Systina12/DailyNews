@@ -6,6 +6,7 @@ import math
 from typing import Dict, List, Tuple, Optional
 from llms.llms import LLMClient
 from utils.logger import get_logger
+from config import settings
 
 logger = get_logger("classify")
 
@@ -108,6 +109,8 @@ class Classify:
         将新闻分类到5个类别之一
         分类优先级：头条 > 政治 > 财经 > 科技 > 国际
         
+        注意：俄罗斯新闻已在 filter_ru 中过滤，这里按内容正常分类
+        
         Returns:
             tuple: (category, confidence) 类别和置信度(0-1)
         """
@@ -115,6 +118,10 @@ class Classify:
         src = (item.get("origin", {}).get("title") or "").lower()
         categories = item.get("categories", [])
         cats = " ".join(str(c).lower() for c in categories)
+        
+        # 获取摘要用于辅助判断
+        summary = (item.get("summaryText") or "")[:200].lower()
+        full_text = f"{title} {summary}"
 
         # 1. 头条：来源标记为top 且 不是软内容
         if ("top" in src or "top" in cats or "头条" in src or "头条" in cats):
@@ -126,48 +133,64 @@ class Classify:
         # 2. 政治
         political_keywords = [
             "election", "vote", "parliament", "government", "president", "prime minister",
-            "policy", "sanction", "cabinet", "congress", "senate", "politic",
-            "选举", "政府", "总统", "议会", "内阁", "制裁",
+            "policy", "sanction", "cabinet", "congress", "senate", "politic", "minister",
+            "law", "legislation", "treaty", "diplomat", "kremlin", "putin",
+            "选举", "政府", "总统", "议会", "内阁", "制裁", "部长", "法律", "立法", "普京", "克里姆林宫",
         ]
-        political_sources = ["politics", "politica"]
+        political_sources = ["politics", "politica", "政治"]
         
-        keyword_match = sum(1 for kw in political_keywords if kw in title)
+        keyword_match = sum(1 for kw in political_keywords if kw in full_text)
         source_match = any(s in src for s in political_sources)
         
-        if keyword_match >= 2 or source_match:
-            return "政治", 0.85
+        if source_match:
+            return "政治", 0.9  # 来源明确，高置信度
+        elif keyword_match >= 3:
+            return "政治", 0.85  # 多个关键词
+        elif keyword_match == 2:
+            return "政治", 0.75  # 两个关键词，刚好达到阈值
         elif keyword_match == 1:
             return "政治", 0.6  # 单个关键词，置信度中等
 
         # 3. 财经
         econ_keywords = [
             "economy", "economic", "market", "stock", "inflation", "bank", "finance", "business",
-            "economia", "borsa", "mercato",
-            "经济", "股市", "通胀", "银行",
+            "trade", "tariff", "gdp", "debt", "bond", "currency", "dollar", "euro", "oil", "gas", "energy",
+            "economia", "borsa", "mercato", "finanza",
+            "经济", "股市", "通胀", "银行", "贸易", "关税", "债务", "货币", "石油", "天然气", "能源",
         ]
-        econ_sources = ["business", "economia"]
+        econ_sources = ["business", "economia", "finance", "财经", "经济"]
         
-        keyword_match = sum(1 for kw in econ_keywords if kw in title)
+        keyword_match = sum(1 for kw in econ_keywords if kw in full_text)
         source_match = any(s in src for s in econ_sources)
         
-        if keyword_match >= 2 or source_match:
+        if source_match:
+            return "财经", 0.9
+        elif keyword_match >= 3:
             return "财经", 0.85
+        elif keyword_match == 2:
+            return "财经", 0.75
         elif keyword_match == 1:
             return "财经", 0.6
 
         # 4. 科技
         tech_keywords = [
             "tech", "technology", "ai", "artificial intelligence", "software", "chip",
-            "science", "scienza",
-            "科技", "人工智能", "半导体",
+            "science", "research", "innovation", "startup", "app", "digital",
+            "computer", "internet", "cyber", "data", "algorithm",
+            "scienza", "tecnologia", "ricerca",
+            "科技", "人工智能", "半导体", "软件", "芯片", "研究", "创新",
         ]
-        tech_sources = ["tech", "science", "scienza"]
+        tech_sources = ["tech", "science", "scienza", "technology", "科技"]
         
-        keyword_match = sum(1 for kw in tech_keywords if kw in title)
+        keyword_match = sum(1 for kw in tech_keywords if kw in full_text)
         source_match = any(s in src for s in tech_sources)
         
-        if keyword_match >= 2 or source_match:
+        if source_match:
+            return "科技", 0.9
+        elif keyword_match >= 3:
             return "科技", 0.85
+        elif keyword_match == 2:
+            return "科技", 0.75
         elif keyword_match == 1:
             return "科技", 0.6
 
@@ -279,7 +302,7 @@ class Classify:
             predicted_category, confidence = self._classify_item(item)
             
             # 3. 根据置信度决定是否需要 LLM
-            if confidence >= 0.75:  # 规则很确定
+            if confidence >= settings.CLASSIFY_CONFIDENCE_THRESHOLD:  # 使用配置的阈值
                 if predicted_category == self.category:
                     result.append(item)
             else:  # 不确定，交给 LLM
@@ -289,13 +312,16 @@ class Classify:
         # 4. LLM 批量处理不确定的
         if uncertain_items:
             logger.info(f"规则分类: {len(result)} 条确定，{len(uncertain_items)} 条需要 LLM 判断")
+            before_llm = len(result)
             llm_results = self._batch_classify_with_llm(uncertain_items)
             
             for item, res in zip(uncertain_items, llm_results):
                 if res['category'] == self.category and not res['is_noise']:
                     result.append(item)
             
-            logger.info(f"LLM 分类后: 新增 {len(result) - len([i for i in items if not self._is_hard_excluded(i)]) + len(uncertain_items)} 条")
+            logger.info(f"LLM 分类后: 从 {len(uncertain_items)} 条中新增 {len(result) - before_llm} 条，总计 {len(result)} 条")
+        else:
+            logger.info(f"规则分类: {len(result)} 条确定，无需 LLM 判断")
         
         return {
             "section": "headline",
@@ -303,94 +329,3 @@ class Classify:
         }
 
 
-class ClassifyRussia(Classify):
-    """
-    俄罗斯新闻分类器
-    用于处理包含俄罗斯新闻的分类逻辑，并进行关键词去噪音
-    """
-
-    # 噪音关键词黑名单（娱乐、体育、生活类）
-    NOISE_KEYWORDS = [
-        "horoscope", "astrology", "celebrity", "gossip", "recipe", "travel", "tourism",
-        "fashion", "beauty", "quiz", "podcast", "movie", "film", "music", "tv", "show",
-        "football", "hockey", "match", "tournament", "weather", "sport",
-        "星座", "八卦", "明星", "娱乐", "美食", "菜谱", "旅游", "体育", "比赛", "天气",
-        "гороскоп", "астрол", "рецеп", "путеше", "туризм", "спорт", "футбол", "хокке", "погода",
-    ]
-
-    def _is_noise(self, item):
-        """判断是否为噪音内容（娱乐、体育、生活等）"""
-        title = (item.get("title") or "").lower()
-        summary = (item.get("summaryText") or "").lower()
-
-        # 检查标题和摘要中是否包含噪音关键词
-        text = f"{title} {summary}"
-        return any(kw in text for kw in self.NOISE_KEYWORDS)
-
-    def _classify_item(self, item):
-        """
-        根据俄罗斯新闻的特征进行分类
-        
-        Returns:
-            tuple: (category, confidence) 类别和置信度(0-1)
-        """
-        title = (item.get("title") or "").lower()
-        src = (item.get("origin", {}).get("title") or "").lower()
-        categories = item.get("categories", [])
-        cats = " ".join(str(c).lower() for c in categories)
-
-        # 特别处理俄罗斯新闻标签
-        if "label/俄罗斯" in cats or "россия" in src:
-            return "俄罗斯", 0.95
-
-        # 如果新闻来自俄罗斯来源，或涉及俄罗斯相关事务
-        russian_keywords = ["russia", "russian", "putin", "путин", "kremlin", "кремл", "moscow", "москв"]
-        keyword_match = sum(1 for kw in russian_keywords if kw in title)
-        
-        if keyword_match >= 2:
-            return "俄罗斯", 0.9
-        elif keyword_match == 1:
-            return "俄罗斯", 0.6
-
-        # 调用父类的方法，如果新闻没涉及俄罗斯，按父类规则分类
-        return super()._classify_item(item)
-
-    def _process_headlines(self, items):
-        """
-        处理俄罗斯新闻：硬排除 → 混合分类（规则+LLM）→ 去噪音 → 筛选
-        """
-        result = []
-        uncertain_items = []
-        
-        for item in items:
-            # 1. 硬排除
-            if self._is_hard_excluded(item):
-                continue
-
-            # 2. 规则分类（带置信度）
-            predicted_category, confidence = self._classify_item(item)
-
-            # 3. 根据置信度决定是否需要 LLM
-            if confidence >= 0.75:
-                # 规则很确定
-                if predicted_category == self.category:
-                    # 4. 去噪音：过滤掉娱乐、体育等内容
-                    if not self._is_noise(item):
-                        result.append(item)
-            else:
-                # 不确定，交给 LLM
-                uncertain_items.append(item)
-
-        # 5. LLM 批量处理不确定的
-        if uncertain_items:
-            logger.info(f"俄罗斯新闻 - 规则分类: {len(result)} 条确定，{len(uncertain_items)} 条需要 LLM 判断")
-            llm_results = self._batch_classify_with_llm(uncertain_items)
-            
-            for item, res in zip(uncertain_items, llm_results):
-                if res['category'] == self.category and not res['is_noise']:
-                    result.append(item)
-
-        return {
-            "section": "headline",
-            "items": result
-        }

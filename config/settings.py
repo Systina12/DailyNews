@@ -75,6 +75,9 @@ class Settings:
     min_keep = int(os.getenv("INTL_MIN_KEEP", "10"))  # 下限
     max_keep = int(os.getenv("INTL_MAX_KEEP", "50"))  # 上限
 
+    # 分类置信度阈值（高于此值使用规则分类，低于此值使用 LLM）
+    CLASSIFY_CONFIDENCE_THRESHOLD = float(os.getenv("CLASSIFY_CONFIDENCE_THRESHOLD", "0.75"))
+
     @classmethod
     def ensure_directories(cls):
         """确保必要的目录存在"""
