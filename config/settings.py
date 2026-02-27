@@ -70,10 +70,21 @@ class Settings:
     SMTP_FROM = os.getenv("SMTP_FROM", "")
     SMTP_TO = os.getenv("SMTP_TO", "")  # 多个收件人用逗号分隔
 
+    # 国际新闻保留策略
     low_water = int(os.getenv("INTL_KEEP_LOW_WATERMARK", "10"))  # 少于等于这个数：全留
     ratio = float(os.getenv("INTL_KEEP_RATIO", "0.2"))  # 多的时候：按比例留
     min_keep = int(os.getenv("INTL_MIN_KEEP", "10"))  # 下限
     max_keep = int(os.getenv("INTL_MAX_KEEP", "50"))  # 上限
+
+    # 头条新闻保留策略（动态控制数量）
+    # 基准：1小时（每小时报）的配置
+    HEADLINE_BASE_HOURS = int(os.getenv("HEADLINE_BASE_HOURS", "1"))  # 基准时间改为1小时
+    HEADLINE_BASE_LOW_WATERMARK = int(os.getenv("HEADLINE_BASE_LOW_WATERMARK", "10"))  # 1小时：10条以下全留
+    HEADLINE_BASE_MAX_KEEP = int(os.getenv("HEADLINE_BASE_MAX_KEEP", "20"))  # 1小时：最多20条
+    
+    # 固定参数（不随时间变化）
+    HEADLINE_KEEP_RATIO = float(os.getenv("HEADLINE_KEEP_RATIO", "0.6"))  # 保留比例 60%（提高到60%）
+    HEADLINE_MIN_KEEP = int(os.getenv("HEADLINE_MIN_KEEP", "8"))  # 最少保留 8 条
 
     # 分类置信度阈值（高于此值使用规则分类，低于此值使用 LLM）
     CLASSIFY_CONFIDENCE_THRESHOLD = float(os.getenv("CLASSIFY_CONFIDENCE_THRESHOLD", "0.75"))
