@@ -41,8 +41,8 @@ def send_html_email(subject: str, html_body: str):
     msg = MIMEMultipart("alternative")
     msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = mail_from
-    msg["To"] = ", ".join(mail_to)
-
+    # 不设置 To 字段，使用 BCC 方式发送，收件人之间互相看不到
+    
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     logger.info(f"准备发送邮件: host={host}, port={port}, to={len(mail_to)}")
@@ -52,7 +52,8 @@ def send_html_email(subject: str, html_body: str):
         server = smtplib.SMTP_SSL(host, port, timeout=settings.API_TIMEOUT)
         if username:
             server.login(username, password)
-        server.send_message(msg)
+        # 直接传入收件人列表，实现 BCC 效果
+        server.sendmail(mail_from, mail_to, msg.as_string())
         logger.info("邮件发送成功")
     except Exception as e:
         logger.error(f"邮件发送失败: {e}")
