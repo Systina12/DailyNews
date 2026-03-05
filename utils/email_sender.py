@@ -15,7 +15,7 @@ def _parse_recipients(to_value: str) -> list[str]:
     return [x.strip() for x in to_value.split(",") if x.strip()]
 
 
-def send_html_email(subject: str, html_body: str):
+def send_html_email(subject: str, html_body: str, test_mode: bool = False):
     """
     发送 HTML 邮件（SMTP）
 
@@ -31,12 +31,32 @@ def send_html_email(subject: str, html_body: str):
     username = getattr(settings, "SMTP_USERNAME", "")
     password = getattr(settings, "SMTP_PASSWORD", "")
     mail_from = getattr(settings, "SMTP_FROM", "")
-    mail_to = _parse_recipients(getattr(settings, "SMTP_TO", ""))
+
+    # 正常收件人列表
+    mail_to_normal = _parse_recipients(getattr(settings, "SMTP_TO", ""))
+
+    # 测试模式收件人（从 TEST_EMAIL / TEST-EMAIL 环境变量读取）
+    test_email = getattr(settings, "TEST_EMAIL", "") or ""
+    mail_to_test = _parse_recipients(test_email)
+
+    # 根据 test_mode 决定实际收件人
+    if test_mode:
+        if not mail_to_test:
+            raise ValueError("测试模式已启用，但 TEST_EMAIL/TEST-EMAIL 未配置")
+        mail_to = mail_to_test
+        logger.info(f"测试模式启用，邮件仅发送到 TEST_EMAIL，count={len(mail_to)}")
+    else:
+        mail_to = mail_to_normal
 
     if not host or not port:
         raise ValueError("SMTP_HOST/SMTP_PORT 未配置")
-    if not mail_from or not mail_to:
-        raise ValueError("SMTP_FROM/SMTP_TO 未配置")
+    if not mail_from:
+        raise ValueError("SMTP_FROM 未配置")
+    if not mail_to:
+        # 根据模式给出更明确的错误提示
+        if test_mode:
+            raise ValueError("测试模式：TEST_EMAIL/TEST-EMAIL 解析后为空")
+        raise ValueError("SMTP_TO 未配置")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = Header(subject, "utf-8")

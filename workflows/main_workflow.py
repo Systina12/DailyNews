@@ -27,7 +27,7 @@ def _safe_filename(s: str) -> str:
     return out
 
 
-def run_main_workflow(categories=None, hours: float = 24):
+def run_main_workflow(categories=None, hours: float = 24, test: bool = False):
     """
     运行主工作流（多分类）
 
@@ -119,8 +119,10 @@ def run_main_workflow(categories=None, hours: float = 24):
         # ✅ 发送邮件：标题不带日期，只要小时
         try:
             subject = f"{hour_cn}-{category}"
-            send_html_email(subject=subject, html_body=merged_summary)
-            logger.info(f"分类 [{category}] 邮件已发送，subject={subject}")
+            send_html_email(subject=subject, html_body=merged_summary, test_mode=test)
+            logger.info(
+                f"分类 [{category}] 邮件已发送，subject={subject}, test_mode={test}"
+            )
         except Exception as e:
             logger.warning(f"分类 [{category}] 邮件发送失败: {e}，继续处理其他任务")
 
@@ -182,7 +184,7 @@ def run_realtime_workflow(categories=None, hours: float = 1):
     }
 
 
-def run_hourly_workflow(categories=None, hours: float = 24):
+def run_hourly_workflow(categories=None, hours: float = 24, test: bool = False):
     """
     小时报工作流入口。
 
@@ -195,9 +197,9 @@ def run_hourly_workflow(categories=None, hours: float = 24):
         hours: 拉取最近多少小时的新闻（默认 24）
     """
     logger.info(
-        f"以 hourly 模式运行主工作流，categories={categories or '默认'}, hours={hours}"
+        f"以 hourly 模式运行主工作流，categories={categories or '默认'}, hours={hours}, test={test}"
     )
-    return run_main_workflow(categories=categories, hours=hours)
+    return run_main_workflow(categories=categories, hours=hours, test=test)
 
 
 def _parse_args():
@@ -221,6 +223,11 @@ def _parse_args():
         choices=["full", "realtime", "hourly"],
         help="运行模式：full=完整流程（默认，向后兼容）；realtime=轻量预热；hourly=小时摘要",
     )
+    p.add_argument(
+        "--test",
+        action="store_true",
+        help="测试模式：只把邮件发送到 TEST_EMAIL/TEST-EMAIL 环境变量指定的地址",
+    )
     return p.parse_args()
 
 
@@ -229,10 +236,10 @@ if __name__ == "__main__":
     cats = [x.strip() for x in (args.categories or "").split(",") if x.strip()] or None
     if args.mode == "full":
         # 原有行为：完整跑一遍（保持向后兼容）
-        run_main_workflow(categories=cats, hours=args.hours)
+        run_main_workflow(categories=cats, hours=args.hours, test=args.test)
     elif args.mode == "realtime":
         # 轻量实时预热：仅拉取+分类，后续可在此接入缓存/吹哨
         run_realtime_workflow(categories=cats, hours=args.hours)
     elif args.mode == "hourly":
         # 小时报：当前等价于完整主流程，未来可在此复用缓存结果
-        run_hourly_workflow(categories=cats, hours=args.hours)
+        run_hourly_workflow(categories=cats, hours=args.hours, test=args.test)

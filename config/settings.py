@@ -70,6 +70,9 @@ class Settings:
     SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
     SMTP_FROM = os.getenv("SMTP_FROM", "")
     SMTP_TO = os.getenv("SMTP_TO", "")  # 多个收件人用逗号分隔
+    # 测试模式收件人（仅在 CLI 传入 --test 时生效）
+    # 优先使用 TEST_EMAIL，其次尝试 TEST-EMAIL（兼容部分部署方式）
+    TEST_EMAIL = os.getenv("TEST_EMAIL", os.getenv("TEST-EMAIL", ""))
 
     # 国际新闻保留策略
     low_water = int(os.getenv("INTL_KEEP_LOW_WATERMARK", "10"))  # 少于等于这个数：全留
