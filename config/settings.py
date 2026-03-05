@@ -36,7 +36,8 @@ class Settings:
 
     # Gemini 配置（使用 google.genai SDK，不需要 API URL）
     GEMINI_TOKEN = os.getenv("GEMINI_TOKEN", "")
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+    # 默认使用最新的便宜模型作为主 Gemini 模型，除非通过环境变量覆盖
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
     # Gemini Flash 便宜模型（用于分类和风险评估）
     GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash-lite")
 
