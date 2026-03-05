@@ -75,7 +75,7 @@ class RSSClient:
                 logger.error(f"FreshRSS 认证请求错误: {e}")
                 raise RuntimeError(f"FreshRSS 认证请求错误: {e}")
 
-    def get_news(self, hours: int, n: int | None = None):
+    def get_news(self, hours: float, n: int | None = None):
         """
         获取最近 N 小时新闻
         FreshRSS(greader) 参数：
@@ -85,21 +85,21 @@ class RSSClient:
         if hours is None:
             raise ValueError("hours 不能为空")
         try:
-            hours_int = int(hours)
+            hours_float = float(hours)
         except Exception:
-            raise ValueError(f"hours 必须是整数: {hours}")
+            raise ValueError(f"hours 必须是数字: {hours}")
 
-        if hours_int <= 0:
-            raise ValueError(f"hours 必须 > 0: {hours_int}")
+        if hours_float <= 0:
+            raise ValueError(f"hours 必须 > 0: {hours_float}")
 
-        seconds = hours_int * 3600
+        seconds = int(hours_float * 3600)
         timestamp = int(time.time() - seconds)
 
         # 你 dzt 里之前用过非常大的 n，这里保持兼容：不传则沿用你之前的“尽量多取”
         if n is None:
             n = 999999999999999
 
-        logger.info(f"开始获取最近 {hours_int} 小时新闻，时间戳: {timestamp}，n={n}")
+        logger.info(f"开始获取最近 {hours_float} 小时新闻，时间戳: {timestamp}，n={n}")
         params = {
             "output": "json",
             "n": n,

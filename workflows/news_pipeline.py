@@ -434,7 +434,7 @@ def _prioritize_headlines(items, enable_llm=True, enable_learning=True):
     return sorted(filtered_items, key=score_item, reverse=True)
 
 
-def _calculate_headline_limits(hours: int):
+def _calculate_headline_limits(hours: float):
     """
     根据拉取的时间范围动态计算头条保留参数
     
@@ -476,7 +476,7 @@ def _calculate_headline_limits(hours: int):
     return low_watermark, max_keep
 
 
-def _apply_headline_limit(headline_items, hours: int):
+def _apply_headline_limit(headline_items, hours: float):
     """
     对头条新闻应用动态保留策略
     
@@ -522,7 +522,7 @@ def _apply_headline_limit(headline_items, hours: int):
     return kept, dropped
 
 
-def _apply_secondary_category_limit(items, category: str, hours: int):
+def _apply_secondary_category_limit(items, category: str, hours: float):
     """
     对次级分类（政治/财经/科技）应用智能水位线
     
@@ -593,7 +593,7 @@ def _apply_secondary_category_limit(items, category: str, hours: int):
     return kept, dropped
 
 
-def _apply_international_limit(items, hours: int):
+def _apply_international_limit(items, hours: float):
     """
     对国际分类应用智能水位线（兜底分类）
     
@@ -657,7 +657,7 @@ def _apply_international_limit(items, hours: int):
     return sorted_items[:keep_count]
 
 
-def run_news_pipeline_all(categories=None, hours: int = 24):
+def run_news_pipeline_all(categories=None, hours: float = 24):
     """
     多分类：一次拉取最近 hours 小时新闻 -> 过滤 -> 去重 -> 每个分类分别产出 block
     
@@ -782,7 +782,7 @@ def run_news_pipeline_all(categories=None, hours: int = 24):
     return blocks
 
 
-def run_news_pipeline(category: str = "头条", hours: int = 24):
+def run_news_pipeline(category: str = "头条", hours: float = 24):
     """单分类：拉取最近 hours 小时新闻 -> 过滤 -> 去重 -> 分类"""
     rss = RSSClient()
     data = rss.get_news(hours=hours)

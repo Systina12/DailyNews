@@ -27,7 +27,7 @@ def _safe_filename(s: str) -> str:
     return out
 
 
-def run_main_workflow(categories=None, hours: int = 24):
+def run_main_workflow(categories=None, hours: float = 24):
     """
     运行主工作流（多分类）
 
@@ -132,12 +132,12 @@ def run_main_workflow(categories=None, hours: int = 24):
         "meta": {
             "generated_at": datetime.now().isoformat(),
             "categories": categories,
-            "hours": int(hours),
+            "hours": float(hours),
         },
     }
 
 
-def run_realtime_workflow(categories=None, hours: int = 1):
+def run_realtime_workflow(categories=None, hours: float = 1):
     """
     实时预热工作流（轻量版，供 crontab 每 N 分钟调用）
 
@@ -176,13 +176,13 @@ def run_realtime_workflow(categories=None, hours: int = 1):
         "meta": {
             "generated_at": datetime.now().isoformat(),
             "categories": categories,
-            "hours": int(hours),
+            "hours": float(hours),
             "mode": "realtime",
         },
     }
 
 
-def run_hourly_workflow(categories=None, hours: int = 24):
+def run_hourly_workflow(categories=None, hours: float = 24):
     """
     小时报工作流入口。
 
@@ -204,9 +204,9 @@ def _parse_args():
     p = argparse.ArgumentParser(description="DailyNews 主工作流（多分类）")
     p.add_argument(
         "--hours",
-        type=int,
+        type=float,
         default=24,
-        help="拉取最近多少小时的新闻（默认 24）",
+        help="拉取最近多少小时的新闻，可以是小数（例如 0.25 表示 15 分钟，默认 24）",
     )
     p.add_argument(
         "--categories",
