@@ -30,8 +30,13 @@ def _safe_filename(s: str) -> str:
 def run_main_workflow(categories=None, hours: int = 24):
     """
     运行主工作流（多分类）
+
+    ⚠ 注意：
+    - 作为库函数：保持原有行为不变（完整执行：拉取 → 分类 → 风险评估 → 摘要 → 写文件+发邮件）
+    - CLI 层面的 --mode 逻辑仅影响 __main__ 分支，避免破坏既有调用方式
+
     Args:
-        categories: 分类列表，默认 ["头条","政治","财经","科技"]
+        categories: 分类列表，默认 ["头条","政治","财经","科技","国际"]
         hours: 拉取最近多少小时的新闻（默认 24）
     """
     settings.ensure_directories()
@@ -132,6 +137,69 @@ def run_main_workflow(categories=None, hours: int = 24):
     }
 
 
+def run_realtime_workflow(categories=None, hours: int = 1):
+    """
+    实时预热工作流（轻量版，供 crontab 每 N 分钟调用）
+
+    当前实现：
+    - 仅执行「拉取 → 预处理 → 多分类」阶段
+    - 主要用于后续接入：缓存打分结果、重大新闻吹哨
+    - 不做风险评估、不生成摘要、不发邮件（避免与主工作流重复）
+
+    注意：
+    - 这是新增的补充入口，不影响原有 run_main_workflow 行为
+    """
+    settings.ensure_directories()
+    settings.validate()
+
+    default_categories = ["头条", "政治", "财经", "科技", "国际"]
+    categories = categories or default_categories
+
+    logger.info(
+        f"开始实时预热工作流（realtime），多分类: {categories}，hours={hours}"
+    )
+
+    # 仅跑到分类这一步，后续缓存/吹哨逻辑可在这里接入
+    blocks = run_news_pipeline_all(categories=categories, hours=hours)
+
+    # 统计一下本次各分类条数，方便在日志里观察
+    logger.info("=" * 60)
+    logger.info("realtime 预热结果（仅分类阶段）：")
+    for block in blocks:
+        cat = block.get("category", "unknown")
+        items = block.get("items") or []
+        logger.info(f"  [{cat}]: {len(items)} 条")
+    logger.info("=" * 60)
+
+    return {
+        "blocks": blocks,
+        "meta": {
+            "generated_at": datetime.now().isoformat(),
+            "categories": categories,
+            "hours": int(hours),
+            "mode": "realtime",
+        },
+    }
+
+
+def run_hourly_workflow(categories=None, hours: int = 24):
+    """
+    小时报工作流入口。
+
+    设计意图：
+    - 为 crontab 提供一个显式的 --mode=hourly 入口
+    - 当前直接复用完整主工作流逻辑（未来可在这里接入“复用缓存结果”的优化）
+
+    Args:
+        categories: 分类列表，默认同 run_main_workflow
+        hours: 拉取最近多少小时的新闻（默认 24）
+    """
+    logger.info(
+        f"以 hourly 模式运行主工作流，categories={categories or '默认'}, hours={hours}"
+    )
+    return run_main_workflow(categories=categories, hours=hours)
+
+
 def _parse_args():
     p = argparse.ArgumentParser(description="DailyNews 主工作流（多分类）")
     p.add_argument(
@@ -146,10 +214,25 @@ def _parse_args():
         default="",
         help='分类列表，逗号分隔，例如： "头条,政治,财经,科技"；不传则用默认分类',
     )
+    p.add_argument(
+        "--mode",
+        type=str,
+        default="full",
+        choices=["full", "realtime", "hourly"],
+        help="运行模式：full=完整流程（默认，向后兼容）；realtime=轻量预热；hourly=小时摘要",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
     cats = [x.strip() for x in (args.categories or "").split(",") if x.strip()] or None
-    run_main_workflow(categories=cats, hours=args.hours)
+    if args.mode == "full":
+        # 原有行为：完整跑一遍（保持向后兼容）
+        run_main_workflow(categories=cats, hours=args.hours)
+    elif args.mode == "realtime":
+        # 轻量实时预热：仅拉取+分类，后续可在此接入缓存/吹哨
+        run_realtime_workflow(categories=cats, hours=args.hours)
+    elif args.mode == "hourly":
+        # 小时报：当前等价于完整主流程，未来可在此复用缓存结果
+        run_hourly_workflow(categories=cats, hours=args.hours)
