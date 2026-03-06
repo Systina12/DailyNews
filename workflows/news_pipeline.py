@@ -179,6 +179,10 @@ def _score_with_llm(items, llm_client):
     """
     使用 LLM 批量评分新闻重要性
     
+    评分标准：
+    - 0-100分：常规评分范围
+    - 100+分：超限评分，只给真正震撼世界的重大事件
+    
     Args:
         items: 新闻列表
         llm_client: LLM 客户端
@@ -190,22 +194,53 @@ def _score_with_llm(items, llm_client):
         return []
     
     from config import settings
-    batch_size = settings.SCORING_BATCH_SIZE  # 使用配置的批次大小
+    batch_size = getattr(settings, 'SCORING_BATCH_SIZE', 20)  # 默认20
     results = []
     
     for i in range(0, len(items), batch_size):
         batch = items[i:i+batch_size]
         
-        # 构建 prompt
-        prompt = "评估以下新闻的重要性（0-100分）。\n\n"
-        prompt += "评分标准：\n"
-        prompt += "- 战争/军事冲突：80-100分\n"
-        prompt += "- 政治重大事件（选举、辞职、政变）：70-90分\n"
-        prompt += "- 经济危机、灾难事故：70-90分\n"
-        prompt += "- 一般政治/经济新闻：50-70分\n"
-        prompt += "- 社会新闻、科技新闻：40-60分\n"
-        prompt += "- 娱乐八卦、生活琐事：10-30分\n"
-        prompt += "- 动物趣闻、美容时尚：0-20分\n\n"
+        # 构建 prompt - 更严格的评分标准
+        prompt = """评估以下新闻的重要性。
+
+评分标准（0-150分，超过100分需要极其谨慎）：
+
+【超限评分 100-150分】- 只给真正震撼世界的重大事件
+- 120-150分：改变世界格局的事件（世界大战爆发、核武器使用、超级大国政权更迭）
+- 100-120分：极其重大的事件（大国间战争、重大恐怖袭击、国家元首遇刺身亡）
+
+【高分 80-99分】- 重要但不至于震撼世界
+- 90-99分：区域性战争升级、重大政治危机、大规模灾难（死亡>1000人）
+- 80-89分：军事冲突、政变、重大经济危机、严重灾难（死亡100-1000人）
+
+【中高分 60-79分】- 值得关注的重要新闻
+- 70-79分：政治重大事件（选举结果、高官辞职）、经济制裁、中等灾难
+- 60-69分：重要政策变化、外交事件、一般灾难
+
+【中分 40-59分】- 一般新闻
+- 50-59分：常规政治/经济新闻、科技突破
+- 40-49分：社会新闻、体育赛事
+
+【低分 20-39分】- 不太重要的新闻
+- 30-39分：地方新闻、小型事故
+- 20-29分：娱乐新闻、生活资讯
+
+【极低分 0-19分】- 琐碎新闻
+- 10-19分：娱乐八卦、时尚美容
+- 0-9分：动物趣闻、星座占卜
+
+参考案例：
+- 美国对伊朗高级将领斩首行动：105-110分（可能引发战争）
+- 巴以冲突升级：85-95分（区域冲突）
+- 俄乌战争日常交火：75-85分（持续冲突）
+- 美国总统选举结果：90-95分（超级大国政权）
+- 一般国家总统选举：70-75分（政治事件）
+- 股市暴跌10%：70-80分（经济危机）
+- 地震死亡50人：75-80分（灾难）
+- 动物园老虎禁食：5-10分（琐碎）
+
+新闻列表：
+"""
         
         for idx, item in enumerate(batch, 1):
             title = item.get("title", "")
@@ -215,15 +250,29 @@ def _score_with_llm(items, llm_client):
                 prompt += f"   摘要: {summary}\n"
             prompt += "\n"
         
-        prompt += "对每条新闻返回：编号|分数\n"
-        prompt += "示例：\n1|85\n2|45\n3|15\n\n严格按照格式输出："
+        prompt += """
+对每条新闻返回：编号|分数
+格式要求：严格按照 "数字|数字" 格式，一行一条
+
+示例：
+1|85
+2|45
+3|8
+
+重要提醒：
+- 超过100分要极其谨慎，大多数新闻不应该超过100分
+- 只有真正可能改变世界的事件才配100+分
+- 娱乐八卦、动物趣闻应该给0-20分
+- 不要因为标题耸动就给高分，要看实际影响
+
+严格按照格式输出："""
         
         try:
             logger.info(f"LLM 评分 {len(batch)} 条新闻（批次大小: {batch_size}）...")
             response = llm_client.request_gemini_flash(
                 prompt=prompt,
                 temperature=0.1,
-                max_tokens=300
+                max_tokens=500
             )
             
             # 解析结果
@@ -237,6 +286,8 @@ def _score_with_llm(items, llm_client):
                     try:
                         idx = int(parts[0].strip())
                         score = int(parts[1].strip())
+                        # 限制最大分数为150
+                        score = min(score, 150)
                         scores[idx] = score
                     except ValueError:
                         continue

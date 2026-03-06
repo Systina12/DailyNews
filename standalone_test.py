@@ -75,41 +75,46 @@ def main():
     print("独立测试 - 邮件 HTML 生成")
     print("=" * 60)
     
-    # 模拟高分新闻
+    # 模拟高分新闻（包含中文标题和摘要）
     important_news = [
         {
             "category": "头条",
-            "score": 95,
-            "title": "巴基斯坦宣布与阿富汗进入公开战争状态并对喀布尔发动空袭",
+            "score": 108,
+            "title": "美国对伊朗高级将领实施斩首行动，中东局势急剧恶化",
+            "original_title": "US conducts assassination strike on Iranian general, Middle East tensions escalate",
             "link": "https://example.com/news/1",
+            "summary": "美国军方对伊朗革命卫队高级将领实施精准打击，导致其身亡。此举引发伊朗强烈反应，威胁进行报复，中东地区战争风险急剧上升。",
+        },
+        {
+            "category": "国际",
+            "score": 92,
+            "title": "巴基斯坦宣布与阿富汗进入公开战争状态并对喀布尔发动空袭",
+            "original_title": "Pakistan declares open war with Afghanistan, launches airstrikes on Kabul",
+            "link": "https://example.com/news/2",
             "summary": "巴基斯坦政府宣布与阿富汗塔利班政权进入公开战争状态，并对喀布尔多个军事目标发动空袭。这是两国关系急剧恶化的最新标志。",
         },
         {
             "category": "国际",
-            "score": 88,
-            "title": "乌克兰向距离边境800公里的俄罗斯地区发射了新型导弹",
-            "link": "https://example.com/news/2",
-            "summary": "乌克兰军方使用新型远程导弹对俄罗斯境内目标实施打击，这是战争升级的重要信号。",
-        },
-        {
-            "category": "财经",
-            "score": 82,
-            "title": "美国总统宣布对中国实施新一轮关税制裁",
+            "score": 85,
+            "title": "乌克兰向俄罗斯境内发射新型远程导弹，打击距边境800公里目标",
+            "original_title": "Ukraine launches new long-range missiles into Russia, hitting targets 800km from border",
             "link": "https://example.com/news/3",
-            "summary": "美国政府宣布对价值500亿美元的中国商品加征25%关税，贸易战进一步升级。",
+            "summary": "乌克兰军方使用新型远程导弹对俄罗斯境内目标实施打击，这是战争升级的重要信号，可能引发俄罗斯更强烈的反应。",
         },
         {
             "category": "头条",
             "score": 81,
-            "title": "日本发生7.5级地震，已造成至少50人死亡",
+            "title": "日本发生7.5级强烈地震，已造成至少50人死亡",
+            "original_title": "Magnitude 7.5 earthquake strikes Japan, at least 50 dead",
             "link": "https://example.com/news/4",
-            "summary": "日本东北部发生强烈地震，多栋建筑倒塌，救援工作正在进行中。",
+            "summary": "日本东北部发生强烈地震，多栋建筑倒塌，救援工作正在进行中。地震还引发了海啸警报，沿海地区居民紧急疏散。",
         },
     ]
     
     print(f"\n生成邮件 HTML...")
     print(f"  模拟新闻: {len(important_news)} 条")
     print(f"  阈值: 80 分")
+    print(f"  评分范围: 81-108 分（包含超限评分）")
     
     try:
         html = build_alert_email(important_news, threshold=80)
@@ -137,6 +142,12 @@ def main():
         print(f"  2. 检查邮件格式是否正确")
         print(f"  3. 检查评分、分类、标题、摘要是否显示正确")
         print(f"  4. 检查样式是否美观（红色警告风格）")
+        print(f"  5. 检查链接是否可点击")
+        print(f"\n注意：")
+        print(f"  - 108分是超限评分（美国斩首伊朗将领级别）")
+        print(f"  - 92分是区域战争级别（巴基斯坦vs阿富汗）")
+        print(f"  - 85分是军事冲突升级（乌克兰导弹）")
+        print(f"  - 81分是重大灾难（日本地震）")
         
     except Exception as e:
         print(f"\n✗ 测试失败: {e}")

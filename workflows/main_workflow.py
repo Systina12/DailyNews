@@ -192,18 +192,70 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
             # 筛选高分新闻
             for item, score in items_with_scores:
                 if score >= importance_threshold:
+                    # 生成中文摘要（如果原文不是中文）
+                    title = item.get("title", "")
+                    original_summary = item.get("summaryText", "")[:300]
+                    
+                    # 使用LLM生成精炼的中文摘要
+                    try:
+                        summary_prompt = f"""请将以下新闻翻译成中文（如果不是中文），并提炼成1-2句话的精炼摘要（50-80字）。
+
+标题：{title}
+原文摘要：{original_summary}
+
+要求：
+1. 如果是中文，直接提炼摘要
+2. 如果是外文，先翻译再提炼
+3. 保留关键信息（人物、地点、事件、影响）
+4. 语言简洁、客观、准确
+5. 只返回摘要内容，不要其他说明
+
+摘要："""
+                        
+                        refined_summary = llm_client.request_gemini_flash(
+                            prompt=summary_prompt,
+                            temperature=0.3,
+                            max_tokens=200
+                        ).strip()
+                        
+                        # 翻译标题（如果需要）
+                        title_prompt = f"""将以下新闻标题翻译成中文（如果已经是中文则保持不变）：
+
+{title}
+
+要求：
+1. 只返回翻译后的标题
+2. 保持简洁准确
+3. 不要添加任何说明
+
+翻译："""
+                        
+                        chinese_title = llm_client.request_gemini_flash(
+                            prompt=title_prompt,
+                            temperature=0.3,
+                            max_tokens=100
+                        ).strip()
+                        
+                    except Exception as e:
+                        logger.error(f"生成摘要失败: {e}，使用原文")
+                        refined_summary = original_summary[:200]
+                        chinese_title = title
+                    
                     important_news.append({
                         "category": cat,
                         "score": score,
-                        "title": item.get("title", ""),
+                        "title": chinese_title,
+                        "original_title": title,
                         "link": item.get("link", ""),
-                        "summary": item.get("summaryText", "")[:200],
+                        "summary": refined_summary,
                         "published": item.get("published", ""),
                     })
-                    logger.warning(f"⚠ 发现重要新闻 [{cat}] {score}分: {item.get('title', '')[:50]}")
+                    logger.warning(f"⚠ 发现重要新闻 [{cat}] {score}分: {chinese_title[:50]}")
         
         except Exception as e:
             logger.error(f"[{cat}] 评分失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             continue
 
     # 3. 发送通知邮件
