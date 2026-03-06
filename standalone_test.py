@@ -82,7 +82,7 @@ def main():
             "score": 108,
             "title": "美国对伊朗高级将领实施斩首行动，中东局势急剧恶化",
             "original_title": "US conducts assassination strike on Iranian general, Middle East tensions escalate",
-            "link": "https://example.com/news/1",
+            "link": "https://www.example.com/news/iran-general-assassination",
             "summary": "美国军方对伊朗革命卫队高级将领实施精准打击，导致其身亡。此举引发伊朗强烈反应，威胁进行报复，中东地区战争风险急剧上升。",
         },
         {
@@ -90,7 +90,7 @@ def main():
             "score": 92,
             "title": "巴基斯坦宣布与阿富汗进入公开战争状态并对喀布尔发动空袭",
             "original_title": "Pakistan declares open war with Afghanistan, launches airstrikes on Kabul",
-            "link": "https://example.com/news/2",
+            "link": "https://www.example.com/news/pakistan-afghanistan-war",
             "summary": "巴基斯坦政府宣布与阿富汗塔利班政权进入公开战争状态，并对喀布尔多个军事目标发动空袭。这是两国关系急剧恶化的最新标志。",
         },
         {
@@ -98,7 +98,7 @@ def main():
             "score": 85,
             "title": "乌克兰向俄罗斯境内发射新型远程导弹，打击距边境800公里目标",
             "original_title": "Ukraine launches new long-range missiles into Russia, hitting targets 800km from border",
-            "link": "https://example.com/news/3",
+            "link": "https://www.example.com/news/ukraine-missiles-russia",
             "summary": "乌克兰军方使用新型远程导弹对俄罗斯境内目标实施打击，这是战争升级的重要信号，可能引发俄罗斯更强烈的反应。",
         },
         {
@@ -106,7 +106,7 @@ def main():
             "score": 81,
             "title": "日本发生7.5级强烈地震，已造成至少50人死亡",
             "original_title": "Magnitude 7.5 earthquake strikes Japan, at least 50 dead",
-            "link": "https://example.com/news/4",
+            "link": "https://www.example.com/news/japan-earthquake",
             "summary": "日本东北部发生强烈地震，多栋建筑倒塌，救援工作正在进行中。地震还引发了海啸警报，沿海地区居民紧急疏散。",
         },
     ]

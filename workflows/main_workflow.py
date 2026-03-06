@@ -354,17 +354,23 @@ def _build_alert_email(important_news, threshold):
         # 转义HTML特殊字符
         title = news.get('title', '无标题').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         summary = news.get('summary', '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        link = news.get('link', '#')
+        link = news.get('link', '')
         
-        # 确保链接不为空
+        # 记录链接信息（用于调试）
+        logger.info(f"构建邮件项 - 标题: {title[:40]}, 链接: {link if link else '(空)'}")
+        
+        # 处理链接
         if not link or link.strip() == '':
-            link = '#'
-        
-        # 转义链接中的特殊字符
-        link = link.replace('&', '&amp;').replace('"', '&quot;')
-        
-        # 调试日志
-        logger.debug(f"邮件项目 - 标题: {title[:30]}, 链接: {link[:50]}")
+            # 链接为空时，使用Google搜索作为备用
+            import urllib.parse
+            search_query = urllib.parse.quote(news.get('original_title', title))
+            link = f"https://www.google.com/search?q={search_query}"
+            link_text = "搜索原文 →"
+            logger.warning(f"新闻链接为空，使用Google搜索: {title[:40]}")
+        else:
+            # 转义链接中的特殊字符
+            link = link.replace('&', '&amp;').replace('"', '&quot;')
+            link_text = "查看原文 →"
         
         html_parts.append(f"""
         <div class="news-item">
@@ -374,7 +380,7 @@ def _build_alert_email(important_news, threshold):
             </div>
             <div class="title">{title}</div>
             <div class="summary">{summary}</div>
-            <div><a class="link" href="{link}" target="_blank">查看原文 →</a></div>
+            <div><a class="link" href="{link}" target="_blank">{link_text}</a></div>
         </div>
 """)
     
