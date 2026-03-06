@@ -60,6 +60,12 @@ class TestCheckDeepseekResponse:
         assert result["safe_to_use"] is True
         assert result["response_length"] == 13
 
+    def test_valid_response_with_status_code(self):
+        """测试有效响应（带状态码）"""
+        result = check_deepseek_response("valid content", status_code=200)
+        assert result["is_filtered"] is False
+        assert result["safe_to_use"] is True
+
     def test_with_error_message(self):
         """测试带错误信息"""
         result = check_deepseek_response("content", error_message="API Error")

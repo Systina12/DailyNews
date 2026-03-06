@@ -139,17 +139,21 @@ def run_main_workflow(categories=None, hours: float = 24, test: bool = False):
     }
 
 
-def run_realtime_workflow(categories=None, hours: float = 1):
+def run_realtime_workflow(categories=None, hours: float = 1, importance_threshold: int = 80, test: bool = False):
     """
-    实时预热工作流（轻量版，供 crontab 每 N 分钟调用）
+    实时监控工作流（轻量版，供 crontab 每 N 分钟调用）
 
-    当前实现：
-    - 仅执行「拉取 → 预处理 → 多分类」阶段
-    - 主要用于后续接入：缓存打分结果、重大新闻吹哨
-    - 不做风险评估、不生成摘要、不发邮件（避免与主工作流重复）
+    功能：
+    - 拉取 → 预处理 → 多分类
+    - LLM 评分检测重要新闻
+    - 发现高分新闻（≥threshold）立即发送通知邮件
+    - 不做风险评估、不生成完整摘要（避免与主工作流重复）
 
-    注意：
-    - 这是新增的补充入口，不影响原有 run_main_workflow 行为
+    Args:
+        categories: 分类列表
+        hours: 拉取最近多少小时的新闻（默认 1 小时）
+        importance_threshold: 重要性阈值（默认 80 分）
+        test: 测试模式，邮件发送到 TEST_EMAIL
     """
     settings.ensure_directories()
     settings.validate()
@@ -158,30 +162,158 @@ def run_realtime_workflow(categories=None, hours: float = 1):
     categories = categories or default_categories
 
     logger.info(
-        f"开始实时预热工作流（realtime），多分类: {categories}，hours={hours}"
+        f"开始实时监控工作流（realtime），多分类: {categories}，hours={hours}，阈值={importance_threshold}，test={test}"
     )
 
-    # 仅跑到分类这一步，后续缓存/吹哨逻辑可在这里接入
+    # 1. 拉取和分类
     blocks = run_news_pipeline_all(categories=categories, hours=hours)
 
-    # 统计一下本次各分类条数，方便在日志里观察
+    # 2. 检测重要新闻
+    from llms.llms import LLMClient
+    from workflows.news_pipeline import score_news_importance
+    
+    llm_client = LLMClient()
+    important_news = []
+    
+    for block in blocks:
+        cat = block.get("category", "unknown")
+        items = block.get("items") or []
+        
+        if not items:
+            logger.info(f"[{cat}] 无新闻，跳过评分")
+            continue
+            
+        logger.info(f"[{cat}] 评分 {len(items)} 条新闻...")
+        
+        try:
+            # LLM 批量评分
+            items_with_scores = score_news_importance(items, llm_client)
+            
+            # 筛选高分新闻
+            for item, score in items_with_scores:
+                if score >= importance_threshold:
+                    important_news.append({
+                        "category": cat,
+                        "score": score,
+                        "title": item.get("title", ""),
+                        "link": item.get("link", ""),
+                        "summary": item.get("summaryText", "")[:200],
+                        "published": item.get("published", ""),
+                    })
+                    logger.warning(f"⚠ 发现重要新闻 [{cat}] {score}分: {item.get('title', '')[:50]}")
+        
+        except Exception as e:
+            logger.error(f"[{cat}] 评分失败: {e}")
+            continue
+
+    # 3. 发送通知邮件
+    if important_news:
+        logger.info(f"发现 {len(important_news)} 条重要新闻，准备发送通知...")
+        
+        try:
+            # 构建邮件内容
+            html_body = _build_alert_email(important_news, importance_threshold)
+            
+            # 发送邮件
+            hour_cn = datetime.now().strftime("%H:%M")
+            subject = f"🚨 重要新闻提醒 ({hour_cn}) - {len(important_news)}条"
+            
+            send_html_email(subject=subject, html_body=html_body, test_mode=test)
+            logger.info(f"✓ 重要新闻通知已发送（test_mode={test}）")
+            
+        except Exception as e:
+            logger.error(f"发送通知邮件失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    else:
+        logger.info("未发现重要新闻")
+
+    # 4. 统计结果
     logger.info("=" * 60)
-    logger.info("realtime 预热结果（仅分类阶段）：")
+    logger.info("realtime 监控结果：")
     for block in blocks:
         cat = block.get("category", "unknown")
         items = block.get("items") or []
         logger.info(f"  [{cat}]: {len(items)} 条")
+    logger.info(f"  重要新闻: {len(important_news)} 条")
     logger.info("=" * 60)
 
     return {
         "blocks": blocks,
+        "important_news": important_news,
         "meta": {
             "generated_at": datetime.now().isoformat(),
             "categories": categories,
             "hours": float(hours),
             "mode": "realtime",
+            "importance_threshold": importance_threshold,
+            "test_mode": test,
         },
     }
+
+
+def _build_alert_email(important_news, threshold):
+    """构建重要新闻提醒邮件的 HTML"""
+    # 使用普通字符串拼接，避免 f-string 中的花括号问题
+    html_parts = []
+    
+    html_parts.append("""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background-color: white; padding: 20px; border-radius: 8px; }
+        .header { background-color: #d32f2f; color: white; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .news-item { border-left: 4px solid #d32f2f; padding: 15px; margin-bottom: 15px; background-color: #fff3f3; }
+        .score { display: inline-block; background-color: #d32f2f; color: white; padding: 3px 8px; border-radius: 3px; font-weight: bold; }
+        .category { display: inline-block; background-color: #666; color: white; padding: 3px 8px; border-radius: 3px; margin-left: 5px; }
+        .title { font-size: 16px; font-weight: bold; margin: 10px 0; color: #333; }
+        .summary { color: #666; margin: 10px 0; line-height: 1.5; }
+        .link { color: #1976d2; text-decoration: none; }
+        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; color: #999; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>🚨 重要新闻提醒</h2>
+            <p>检测到 """ + str(len(important_news)) + """ 条重要性评分 ≥""" + str(threshold) + """ 的新闻</p>
+        </div>
+""")
+    
+    # 按评分排序
+    sorted_news = sorted(important_news, key=lambda x: x["score"], reverse=True)
+    
+    for news in sorted_news:
+        # 转义HTML特殊字符
+        title = news['title'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        summary = news['summary'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        link = news['link'].replace('&', '&amp;').replace('"', '&quot;')
+        
+        html_parts.append(f"""
+        <div class="news-item">
+            <div>
+                <span class="score">{news['score']}分</span>
+                <span class="category">{news['category']}</span>
+            </div>
+            <div class="title">{title}</div>
+            <div class="summary">{summary}</div>
+            <div><a class="link" href="{link}" target="_blank">查看原文 →</a></div>
+        </div>
+""")
+    
+    html_parts.append("""
+        <div class="footer">
+            <p>此邮件由 DailyNews 实时监控系统自动发送</p>
+            <p>生成时间: """ + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """</p>
+        </div>
+    </div>
+</body>
+</html>
+""")
+    
+    return ''.join(html_parts)
 
 
 def run_hourly_workflow(categories=None, hours: float = 24, test: bool = False):
@@ -228,6 +360,12 @@ def _parse_args():
         action="store_true",
         help="测试模式：只把邮件发送到 TEST_EMAIL/TEST-EMAIL 环境变量指定的地址",
     )
+    p.add_argument(
+        "--threshold",
+        type=int,
+        default=80,
+        help="实时监控模式的重要性阈值（默认 80 分），只在 --mode=realtime 时生效",
+    )
     return p.parse_args()
 
 
@@ -238,8 +376,13 @@ if __name__ == "__main__":
         # 原有行为：完整跑一遍（保持向后兼容）
         run_main_workflow(categories=cats, hours=args.hours, test=args.test)
     elif args.mode == "realtime":
-        # 轻量实时预热：仅拉取+分类，后续可在此接入缓存/吹哨
-        run_realtime_workflow(categories=cats, hours=args.hours)
+        # 实时监控：拉取+分类+评分+吹哨
+        run_realtime_workflow(
+            categories=cats, 
+            hours=args.hours, 
+            importance_threshold=args.threshold,
+            test=args.test
+        )
     elif args.mode == "hourly":
         # 小时报：当前等价于完整主流程，未来可在此复用缓存结果
         run_hourly_workflow(categories=cats, hours=args.hours, test=args.test)

@@ -60,21 +60,27 @@ class LLMClient:
 
                 # 检查 HTTP 400 状态码（内容过滤）
                 if response.status_code == 400:
-                    raise ContentFilteredException("HTTP 400 状态码")
+                    try:
+                        error_body = response.json()
+                        error_msg = error_body.get("error", {}).get("message", "未知错误")
+                    except:
+                        error_msg = response.text or "无响应体"
+                    raise ContentFilteredException(f"HTTP 400 - {error_msg}")
 
                 response.raise_for_status()
                 result = response.json()
                 content = result["choices"][0]["message"]["content"]
 
-                # 检查内容安全
-                check_result = check_deepseek_response(content, response.status_code)
+                # 检查内容安全（不传status_code，因为已经通过了raise_for_status）
+                check_result = check_deepseek_response(content)
                 if check_result["is_filtered"]:
                     raise ContentFilteredException(check_result["reason"])
 
                 return content
 
-            except ContentFilteredException:
-                # 内容过滤不重试
+            except ContentFilteredException as e:
+                # 内容过滤不重试，记录日志
+                logger.warning(f"DeepSeek 触发内容安全机制: {e.reason}")
                 raise
             except requests.exceptions.Timeout:
                 if attempt < max_retries - 1:
@@ -256,8 +262,8 @@ class LLMClient:
             }
         except ContentFilteredException as e:
             # 主模型触发风控，fallback 到备用模型
-            print(f"⚠ {primary} 触发内容安全机制: {e.reason}")
-            print(f"→ 自动切换到 {fallback_name}")
+            logger.warning(f"⚠ {primary} 触发内容安全机制: {e.reason}")
+            logger.info(f"→ 自动切换到 {fallback_name}")
 
             try:
                 content = fallback_func(prompt, temperature, max_tokens)

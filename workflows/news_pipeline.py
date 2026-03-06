@@ -257,6 +257,20 @@ def _score_with_llm(items, llm_client):
     return results
 
 
+def score_news_importance(items, llm_client):
+    """
+    公开接口：使用 LLM 批量评分新闻重要性
+    
+    Args:
+        items: 新闻列表
+        llm_client: LLM 客户端实例
+        
+    Returns:
+        list: [(item, score), ...] 新闻及其评分
+    """
+    return _score_with_llm(items, llm_client)
+
+
 def _prioritize_headlines(items, enable_llm=True, enable_learning=True):
     """
     对头条新闻按重要性排序
