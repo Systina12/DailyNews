@@ -15,13 +15,13 @@ class Classify:
     """
     新闻分类器
     流程：硬排除 → 分类（头条需额外检查软内容）→ 筛选
-    支持5个类别：头条、政治、财经、科技、国际
+    支持6个类别：头条、政治、军事、财经、科技、国际
     """
 
     def __init__(self, category):
         """
         Args:
-            category: 要提取的类别（头条/政治/财经/科技/国际）
+            category: 要提取的类别（头条/政治/军事/财经/科技/国际）
         """
         self.category = category
 
@@ -106,8 +106,8 @@ class Classify:
 
     def _classify_item(self, item):
         """
-        将新闻分类到5个类别之一
-        分类优先级：头条 > 政治 > 财经 > 科技 > 国际
+        将新闻分类到6个类别之一
+        分类优先级：头条 > 政治 > 军事 > 财经 > 科技 > 国际
         
         注意：俄罗斯新闻已在 filter_ru 中过滤，这里按内容正常分类
         
@@ -151,7 +151,31 @@ class Classify:
         elif keyword_match == 1:
             return "政治", 0.6  # 单个关键词，置信度中等
 
-        # 3. 财经
+        # 3. 军事
+        military_keywords = [
+            "military", "war", "army", "navy", "air force", "defense", "weapon", "missile",
+            "attack", "strike", "combat", "soldier", "troop", "battle", "conflict",
+            "nato", "pentagon", "drone", "fighter", "tank", "submarine", "aircraft carrier",
+            "nuclear", "bomb", "explosion", "warfare", "invasion", "occupation",
+            "军事", "战争", "军队", "海军", "空军", "国防", "武器", "导弹",
+            "攻击", "袭击", "战斗", "士兵", "部队", "冲突", "北约", "无人机", "战机", "坦克", "潜艇", "航母",
+            "核武器", "炸弹", "爆炸", "入侵", "占领",
+        ]
+        military_sources = ["military", "defense", "guerra", "军事", "国防"]
+        
+        keyword_match = sum(1 for kw in military_keywords if kw in full_text)
+        source_match = any(s in src for s in military_sources)
+        
+        if source_match:
+            return "军事", 0.9  # 来源明确，高置信度
+        elif keyword_match >= 3:
+            return "军事", 0.85  # 多个关键词
+        elif keyword_match == 2:
+            return "军事", 0.75  # 两个关键词
+        elif keyword_match == 1:
+            return "军事", 0.6  # 单个关键词
+
+        # 4. 财经
         econ_keywords = [
             "economy", "economic", "market", "stock", "inflation", "bank", "finance", "business",
             "trade", "tariff", "gdp", "debt", "bond", "currency", "dollar", "euro", "oil", "gas", "energy",
@@ -172,7 +196,7 @@ class Classify:
         elif keyword_match == 1:
             return "财经", 0.6
 
-        # 4. 科技
+        # 5. 科技
         tech_keywords = [
             "tech", "technology", "ai", "artificial intelligence", "software", "chip",
             "science", "research", "innovation", "startup", "app", "digital",
@@ -194,7 +218,7 @@ class Classify:
         elif keyword_match == 1:
             return "科技", 0.6
 
-        # 5. 国际（兜底）
+        # 6. 国际（兜底）
         return "国际", 0.4  # 兜底分类，置信度低
 
     def _batch_classify_with_llm(self, items: List[Dict]) -> List[Dict]:
@@ -234,12 +258,13 @@ class Classify:
             
             prompt += """对每条新闻返回：编号|类别|是否噪音
 
-类别选项：头条/政治/财经/科技/国际
-是否噪音：yes（娱乐、体育、生活、文化类）/ no（政治、经济、科技、国际新闻）
+类别选项：头条/政治/军事/财经/科技/国际
+是否噪音：yes（娱乐、体育、生活、文化类）/ no（政治、经济、科技、军事、国际新闻）
 
 判断标准：
 - 头条：重大突发事件、高层政治动态
 - 政治：选举、政府、议会、政策、制裁
+- 军事：战争、军队、武器、导弹、攻击、冲突
 - 财经：经济、市场、股市、通胀、银行
 - 科技：技术、AI、软件、芯片、科学
 - 国际：其他国际新闻
@@ -247,7 +272,7 @@ class Classify:
 
 示例输出：
 1|政治|no
-2|国际|no
+2|军事|no
 3|头条|yes
 4|财经|no
 

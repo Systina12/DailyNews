@@ -18,7 +18,7 @@ def run_risk_assessment_pipeline(classified_data):
         classified_data: 分类后的新闻数据，格式：
             {
                 "section": "headline",
-                "category": "头条/政治/财经/科技/国际",   # 可选，但建议带上
+                "category": "头条/政治/军事/财经/科技/国际",   # 可选，但建议带上
                 "items": [...]
             }
 

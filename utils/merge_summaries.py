@@ -180,8 +180,6 @@ def _build_styled_html(
             font-size: 20px;
             font-weight: 600;
             margin: 35px 0 20px 0;
-            padding-left: 12px;
-            border-left: 4px solid #2196F3;
         }
         h2:first-of-type {
             margin-top: 0;
@@ -252,14 +250,14 @@ def _build_styled_html(
     # 低风险新闻段落
     if low_paragraphs:
         if add_section_headers:
-            html_parts.append("        <h2>〖ds新闻〗</h2>\n")
+            html_parts.append("        <h2>【ds新闻】</h2>\n")
         for p in low_paragraphs:
             html_parts.append(f"        <p>{p}</p>\n")
     
     # 高风险新闻段落
     if high_paragraphs:
         if add_section_headers:
-            html_parts.append("        <h2>〖gemini新闻〗</h2>\n")
+            html_parts.append("        <h2>【gemini新闻】</h2>\n")
         for p in high_paragraphs:
             html_parts.append(f"        <p>{p}</p>\n")
     
