@@ -139,6 +139,35 @@ def run_main_workflow(categories=None, hours: float = 24, test: bool = False):
     }
 
 
+def _extract_link(item):
+    """
+    从新闻 item 中提取链接
+    优先级：canonical > alternate > link
+    
+    注意：此函数已被 preprocessing.normalize.normalize_link() 替代。
+    在 run_news_pipeline_all() 中会自动标准化所有 item 的 link 字段。
+    保留此函数仅作为备用或独立使用场景。
+    """
+    link = ""
+    
+    # 1. 尝试从 canonical 数组提取
+    canonical = item.get("canonical")
+    if isinstance(canonical, list) and canonical:
+        link = canonical[0].get("href", "") or ""
+    
+    # 2. 如果没有，尝试从 alternate 数组提取
+    if not link:
+        alternate = item.get("alternate")
+        if isinstance(alternate, list) and alternate:
+            link = alternate[0].get("href", "") or ""
+    
+    # 3. 最后尝试直接的 link 字段
+    if not link:
+        link = item.get("link", "") or ""
+    
+    return link
+
+
 def run_realtime_workflow(categories=None, hours: float = 1, importance_threshold: int = 80, test: bool = False):
     """
     实时监控工作流（轻量版，供 crontab 每 N 分钟调用）
@@ -195,7 +224,7 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
                     # 生成中文摘要（如果原文不是中文）
                     title = item.get("title", "")
                     original_summary = item.get("summaryText", "")[:300]
-                    link = item.get("link", "")
+                    link = item.get("link", "")  # 直接使用标准化后的 link 字段
                     
                     # 使用LLM生成精炼的中文摘要
                     try:
@@ -259,11 +288,11 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
                         "score": score,
                         "title": chinese_title,
                         "original_title": title,
-                        "link": link,  # 确保链接被正确传递
+                        "link": link,  # 使用提取的链接
                         "summary": refined_summary,
                         "published": item.get("published", ""),
                     })
-                    logger.warning(f"⚠ 发现重要新闻 [{cat}] {score}分: {chinese_title[:50]}")
+                    logger.warning(f"⚠ 发现重要新闻 [{cat}] {score}分: {chinese_title[:50]}, 链接: {link[:50] if link else '(空)'}")
         
         except Exception as e:
             logger.error(f"[{cat}] 评分失败: {e}")

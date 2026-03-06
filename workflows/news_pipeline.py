@@ -724,17 +724,20 @@ def _apply_international_limit(items, hours: float):
 
 def run_news_pipeline_all(categories=None, hours: float = 24):
     """
-    多分类：一次拉取最近 hours 小时新闻 -> 过滤 -> 去重 -> 每个分类分别产出 block
+    多分类：一次拉取最近 hours 小时新闻 -> 标准化 -> 过滤 -> 去重 -> 每个分类分别产出 block
     
     分层过滤策略：
     1. 头条（最严格）：按重要性保留，不够重要的下放到次级分类
     2. 政治/财经/科技（次级）：相对宽松（1.5倍水位线），过于不重要的下放到国际
     3. 国际（兜底）：与头条同级水位线，完全不重要的直接丢弃
     """
+    from preprocessing.normalize import normalize_items
+    
     categories = categories or DEFAULT_CATEGORIES
     rss = RSSClient()
     data = rss.get_news(hours=hours)
-    filtered = filter_ru(data)
+    normalized = normalize_items(data)  # 标准化链接字段
+    filtered = filter_ru(normalized)
     deduped = dedupe_items(filtered)
     raw_items = deduped.get("items", [])
 
