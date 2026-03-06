@@ -4,7 +4,7 @@
 
 目标：
 1) 将 LLM 生成的引用标记 [N] 替换为真实新闻 URL 的超链接
-2) 超链接只出现在“每条新闻（每个<p>段落）最后一个标点后面”
+2) 超链接只出现在"每条新闻（每个<p>段落）最后一个标点后面"
    - 段落中间不出现链接标
    - 若一个段落内有多个引用，则全部汇总到段落末尾标点之后
 """
@@ -18,7 +18,7 @@ from utils.logger import get_logger
 
 logger = get_logger("link_processor")
 
-# 认为“句末/段末”的常见标点（中英）
+# 认为"句末/段末"的常见标点（中英）
 _END_PUNCT = "。！？；.!?;"
 
 
@@ -92,6 +92,17 @@ def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
         if not links:
             return m.group(0)
 
+        # 去重：使用set去除重复的链接（保持顺序）
+        seen = set()
+        unique_links = []
+        for link in links:
+            if link not in seen:
+                seen.add(link)
+                unique_links.append(link)
+        
+        if len(links) != len(unique_links):
+            logger.info(f"段落中发现重复链接: 原始{len(links)}个，去重后{len(unique_links)}个")
+
         # 去掉段落中间的所有链接
         inner_wo = link_pat.sub("", inner)
 
@@ -99,9 +110,9 @@ def process_summary_links(summary_html: str, refs: list[dict[str, Any]]):
         inner_wo = re.sub(r"[ \t]{2,}", " ", inner_wo)
         inner_wo = re.sub(r"\s+\n", "\n", inner_wo).strip()
 
-        links_str = "".join(links)
+        links_str = "".join(unique_links)
 
-        # 在“最后一个标点”后面插入 links
+        # 在"最后一个标点"后面插入 links
         # 优先匹配段落末尾的标点（允许标点后有空白）
         end_punct_re = re.compile(rf"([{re.escape(_END_PUNCT)}])(\s*)$", flags=re.DOTALL)
         mm = end_punct_re.search(inner_wo)

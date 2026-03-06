@@ -42,14 +42,25 @@ def _force_h1_title(html: str, title: str) -> str:
     """
     强制把 HTML 的第一个 <h1> 改成指定 title。
     - 若没有 <h1>，则在最前面插入。
+    - 支持完整HTML文档和简单HTML片段
     """
     if not html:
         return f"<h1>{title}</h1>"
 
-    if re.search(r"<h1>.*?</h1>", html, flags=re.DOTALL):
-        return re.sub(r"<h1>.*?</h1>", f"<h1>{title}</h1>", html, count=1, flags=re.DOTALL)
+    # 转义title中的HTML特殊字符
+    escaped_title = title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
-    return f"<h1>{title}</h1>\n{html}"
+    if re.search(r"<h1[^>]*>.*?</h1>", html, flags=re.DOTALL):
+        # 替换第一个h1标签（保留可能的属性）
+        return re.sub(
+            r"<h1[^>]*>.*?</h1>",
+            f"<h1>{escaped_title}</h1>",
+            html,
+            count=1,
+            flags=re.DOTALL
+        )
+
+    return f"<h1>{escaped_title}</h1>\n{html}"
 
 
 def run_summary_generation_pipeline(risk_annotated_data):
