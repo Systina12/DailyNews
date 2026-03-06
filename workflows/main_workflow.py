@@ -195,6 +195,7 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
                     # 生成中文摘要（如果原文不是中文）
                     title = item.get("title", "")
                     original_summary = item.get("summaryText", "")[:300]
+                    link = item.get("link", "")
                     
                     # 使用LLM生成精炼的中文摘要
                     try:
@@ -208,9 +209,10 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
 2. 如果是外文，先翻译再提炼
 3. 保留关键信息（人物、地点、事件、影响）
 4. 语言简洁、客观、准确
-5. 只返回摘要内容，不要其他说明
+5. 只返回摘要内容本身，不要任何标记、标题、说明文字
+6. 不要包含"摘要："、"翻译："、"**"等标记
 
-摘要："""
+直接输出摘要："""
                         
                         refined_summary = llm_client.request_gemini_flash(
                             prompt=summary_prompt,
@@ -218,23 +220,34 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
                             max_tokens=200
                         ).strip()
                         
+                        # 清理可能的格式标记
+                        refined_summary = refined_summary.replace("**摘要：**", "").replace("**翻译：**", "")
+                        refined_summary = refined_summary.replace("摘要：", "").replace("翻译：", "")
+                        refined_summary = refined_summary.replace("**", "").strip()
+                        
                         # 翻译标题（如果需要）
                         title_prompt = f"""将以下新闻标题翻译成中文（如果已经是中文则保持不变）：
 
 {title}
 
 要求：
-1. 只返回翻译后的标题
+1. 只返回翻译后的标题本身
 2. 保持简洁准确
-3. 不要添加任何说明
+3. 不要添加任何说明、标记、引号
+4. 不要包含"翻译："、"标题："等前缀
 
-翻译："""
+直接输出标题："""
                         
                         chinese_title = llm_client.request_gemini_flash(
                             prompt=title_prompt,
                             temperature=0.3,
                             max_tokens=100
                         ).strip()
+                        
+                        # 清理可能的格式标记
+                        chinese_title = chinese_title.replace("**翻译：**", "").replace("**标题：**", "")
+                        chinese_title = chinese_title.replace("翻译：", "").replace("标题：", "")
+                        chinese_title = chinese_title.replace("**", "").replace('"', '').replace("'", "").strip()
                         
                     except Exception as e:
                         logger.error(f"生成摘要失败: {e}，使用原文")
@@ -246,7 +259,7 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
                         "score": score,
                         "title": chinese_title,
                         "original_title": title,
-                        "link": item.get("link", ""),
+                        "link": link,  # 确保链接被正确传递
                         "summary": refined_summary,
                         "published": item.get("published", ""),
                     })
@@ -339,15 +352,25 @@ def _build_alert_email(important_news, threshold):
     
     for news in sorted_news:
         # 转义HTML特殊字符
-        title = news['title'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        summary = news['summary'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        link = news['link'].replace('&', '&amp;').replace('"', '&quot;')
+        title = news.get('title', '无标题').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        summary = news.get('summary', '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        link = news.get('link', '#')
+        
+        # 确保链接不为空
+        if not link or link.strip() == '':
+            link = '#'
+        
+        # 转义链接中的特殊字符
+        link = link.replace('&', '&amp;').replace('"', '&quot;')
+        
+        # 调试日志
+        logger.debug(f"邮件项目 - 标题: {title[:30]}, 链接: {link[:50]}")
         
         html_parts.append(f"""
         <div class="news-item">
             <div>
                 <span class="score">{news['score']}分</span>
-                <span class="category">{news['category']}</span>
+                <span class="category">{news.get('category', '未知')}</span>
             </div>
             <div class="title">{title}</div>
             <div class="summary">{summary}</div>
