@@ -174,9 +174,10 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
 
     功能：
     - 拉取 → 预处理 → 多分类
-    - LLM 评分检测重要新闻
-    - 发现高分新闻（≥threshold）立即发送通知邮件
+    - LLM 评分检测重要新闻（优先使用缓存）
+    - 发现高分新闻（≥threshold）立即发送通知邮件（避免重复发送）
     - 不做风险评估、不生成完整摘要（避免与主工作流重复）
+    - 缓存评分结果供后续工作流复用
 
     Args:
         categories: 分类列表
@@ -194,6 +195,15 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
         f"开始实时监控工作流（realtime），多分类: {categories}，hours={hours}，阈值={importance_threshold}，test={test}"
     )
 
+    # 初始化缓存
+    from utils.news_cache import get_news_cache
+    cache = get_news_cache()
+    
+    # 清理过期缓存
+    expired_count = cache.cleanup_expired()
+    if expired_count > 0:
+        logger.info(f"清理过期缓存 {expired_count} 条")
+
     # 1. 拉取和分类
     blocks = run_news_pipeline_all(categories=categories, hours=hours)
 
@@ -203,6 +213,7 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
     
     llm_client = LLMClient()
     important_news = []
+    cache_stats = {'hit': 0, 'miss': 0, 'llm_calls': 0}
     
     for block in blocks:
         cat = block.get("category", "unknown")
@@ -212,23 +223,73 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
             logger.info(f"[{cat}] 无新闻，跳过评分")
             continue
             
-        logger.info(f"[{cat}] 评分 {len(items)} 条新闻...")
+        logger.info(f"[{cat}] 处理 {len(items)} 条新闻...")
         
         try:
-            # LLM 批量评分
-            items_with_scores = score_news_importance(items, llm_client)
+            # 检查缓存，分离已缓存和未缓存的新闻
+            cached_items, uncached_items = cache.get_cached_scores(items)
+            cache_stats['hit'] += len(cached_items)
+            cache_stats['miss'] += len(uncached_items)
             
-            # 筛选高分新闻
-            for item, score in items_with_scores:
+            # 处理已缓存的新闻
+            for item in cached_items:
+                score = item['importance_score']
                 if score >= importance_threshold:
-                    # 生成中文摘要（如果原文不是中文）
                     title = item.get("title", "")
-                    original_summary = item.get("summaryText", "")[:300]
-                    link = item.get("link", "")  # 直接使用标准化后的 link 字段
+                    link = item.get("link", "")
                     
-                    # 使用LLM生成精炼的中文摘要
-                    try:
-                        summary_prompt = f"""请将以下新闻翻译成中文（如果不是中文），并提炼成1-2句话的精炼摘要（50-80字）。
+                    # 检查是否已发送告警
+                    if cache.is_alert_sent(title, link):
+                        logger.debug(f"跳过已发送告警: {item['chinese_title'][:50]}")
+                        continue
+                    
+                    important_news.append({
+                        "category": cat,
+                        "score": score,
+                        "title": item['chinese_title'],
+                        "original_title": title,
+                        "link": link,
+                        "summary": item.get('chinese_summary', ''),
+                        "published": item.get("published", ""),
+                        "from_cache": True
+                    })
+                    logger.info(f"✓ 缓存命中高分新闻 [{cat}] {score}分: {item['chinese_title'][:50]}")
+            
+            # 对未缓存的新闻进行LLM评分
+            if uncached_items:
+                logger.info(f"[{cat}] LLM评分 {len(uncached_items)} 条新闻...")
+                items_with_scores = score_news_importance(uncached_items, llm_client)
+                cache_stats['llm_calls'] += len(uncached_items)
+                
+                # 筛选高分新闻并生成中文内容
+                for item, score in items_with_scores:
+                    title = item.get("title", "")
+                    link = item.get("link", "")
+                    original_summary = item.get("summaryText", "")[:300]
+                    
+                    # 初始化中文内容
+                    chinese_title = title
+                    refined_summary = original_summary[:200]
+                    
+                    # 只对高分新闻生成中文内容（节省LLM调用）
+                    if score >= importance_threshold:
+                        # 检查是否已发送告警
+                        if cache.is_alert_sent(title, link):
+                            logger.debug(f"跳过已发送告警: {title[:50]}")
+                            # 仍然缓存评分，但不加入告警列表
+                            cache.cache_news(
+                                title=title,
+                                link=link,
+                                category=cat,
+                                importance_score=score,
+                                published=item.get("published", ""),
+                                alert_sent=True
+                            )
+                            continue
+                        
+                        # 使用LLM生成精炼的中文摘要
+                        try:
+                            summary_prompt = f"""请将以下新闻翻译成中文（如果不是中文），并提炼成1-2句话的精炼摘要（50-80字）。
 
 标题：{title}
 原文摘要：{original_summary}
@@ -242,20 +303,20 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
 6. 不要包含"摘要："、"翻译："、"**"等标记
 
 直接输出摘要："""
-                        
-                        refined_summary = llm_client.request_gemini_flash(
-                            prompt=summary_prompt,
-                            temperature=0.3,
-                            max_tokens=200
-                        ).strip()
-                        
-                        # 清理可能的格式标记
-                        refined_summary = refined_summary.replace("**摘要：**", "").replace("**翻译：**", "")
-                        refined_summary = refined_summary.replace("摘要：", "").replace("翻译：", "")
-                        refined_summary = refined_summary.replace("**", "").strip()
-                        
-                        # 翻译标题（如果需要）
-                        title_prompt = f"""将以下新闻标题翻译成中文（如果已经是中文则保持不变）：
+                            
+                            refined_summary = llm_client.request_gemini_flash(
+                                prompt=summary_prompt,
+                                temperature=0.3,
+                                max_tokens=200
+                            ).strip()
+                            
+                            # 清理可能的格式标记
+                            refined_summary = refined_summary.replace("**摘要：**", "").replace("**翻译：**", "")
+                            refined_summary = refined_summary.replace("摘要：", "").replace("翻译：", "")
+                            refined_summary = refined_summary.replace("**", "").strip()
+                            
+                            # 翻译标题（如果需要）
+                            title_prompt = f"""将以下新闻标题翻译成中文（如果已经是中文则保持不变）：
 
 {title}
 
@@ -266,33 +327,48 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
 4. 不要包含"翻译："、"标题："等前缀
 
 直接输出标题："""
+                            
+                            chinese_title = llm_client.request_gemini_flash(
+                                prompt=title_prompt,
+                                temperature=0.3,
+                                max_tokens=100
+                            ).strip()
+                            
+                            # 清理可能的格式标记
+                            chinese_title = chinese_title.replace("**翻译：**", "").replace("**标题：**", "")
+                            chinese_title = chinese_title.replace("翻译：", "").replace("标题：", "")
+                            chinese_title = chinese_title.replace("**", "").replace('"', '').replace("'", "").strip()
+                            
+                            cache_stats['llm_calls'] += 2  # 摘要+标题
+                            
+                        except Exception as e:
+                            logger.error(f"生成摘要失败: {e}，使用原文")
+                            refined_summary = original_summary[:200]
+                            chinese_title = title
                         
-                        chinese_title = llm_client.request_gemini_flash(
-                            prompt=title_prompt,
-                            temperature=0.3,
-                            max_tokens=100
-                        ).strip()
-                        
-                        # 清理可能的格式标记
-                        chinese_title = chinese_title.replace("**翻译：**", "").replace("**标题：**", "")
-                        chinese_title = chinese_title.replace("翻译：", "").replace("标题：", "")
-                        chinese_title = chinese_title.replace("**", "").replace('"', '').replace("'", "").strip()
-                        
-                    except Exception as e:
-                        logger.error(f"生成摘要失败: {e}，使用原文")
-                        refined_summary = original_summary[:200]
-                        chinese_title = title
+                        important_news.append({
+                            "category": cat,
+                            "score": score,
+                            "title": chinese_title,
+                            "original_title": title,
+                            "link": link,
+                            "summary": refined_summary,
+                            "published": item.get("published", ""),
+                            "from_cache": False
+                        })
+                        logger.warning(f"⚠ 发现重要新闻 [{cat}] {score}分: {chinese_title[:50]}")
                     
-                    important_news.append({
-                        "category": cat,
-                        "score": score,
-                        "title": chinese_title,
-                        "original_title": title,
-                        "link": link,  # 使用提取的链接
-                        "summary": refined_summary,
-                        "published": item.get("published", ""),
-                    })
-                    logger.warning(f"⚠ 发现重要新闻 [{cat}] {score}分: {chinese_title[:50]}, 链接: {link[:50] if link else '(空)'}")
+                    # 缓存所有评分结果（包括低分新闻）
+                    cache.cache_news(
+                        title=title,
+                        link=link,
+                        category=cat,
+                        importance_score=score,
+                        chinese_title=chinese_title if score >= importance_threshold else None,
+                        chinese_summary=refined_summary if score >= importance_threshold else None,
+                        published=item.get("published", ""),
+                        alert_sent=False
+                    )
         
         except Exception as e:
             logger.error(f"[{cat}] 评分失败: {e}")
@@ -315,6 +391,10 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
             send_html_email(subject=subject, html_body=html_body, test_mode=test)
             logger.info(f"✓ 重要新闻通知已发送（test_mode={test}）")
             
+            # 标记所有新闻为已发送告警
+            for news in important_news:
+                cache.mark_alert_sent(news['original_title'], news['link'])
+            
         except Exception as e:
             logger.error(f"发送通知邮件失败: {e}")
             import traceback
@@ -330,6 +410,11 @@ def run_realtime_workflow(categories=None, hours: float = 1, importance_threshol
         items = block.get("items") or []
         logger.info(f"  [{cat}]: {len(items)} 条")
     logger.info(f"  重要新闻: {len(important_news)} 条")
+    logger.info(f"  缓存统计: 命中 {cache_stats['hit']} 条, 未命中 {cache_stats['miss']} 条, LLM调用 {cache_stats['llm_calls']} 次")
+    
+    # 显示缓存统计
+    stats = cache.get_stats()
+    logger.info(f"  缓存总量: {stats['total']} 条 (1h: {stats['last_1h']}, 6h: {stats['last_6h']}, 24h: {stats['last_24h']})")
     logger.info("=" * 60)
 
     return {
