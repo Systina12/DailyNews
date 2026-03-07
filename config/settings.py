@@ -15,13 +15,14 @@ class Settings:
     BASE_DIR = Path(__file__).parent.parent
 
     # FreshRSS 配置
+    # 使用 localhost:51264 访问（FreshRSS 容器端口映射）
     FRESHRSS_URL = os.getenv(
         "FRESHRSS_URL",
-        "http://1Panel-freshrss-WMI/api/greader.php/reader/api/0/stream/contents/user/-/state/com.google/reading-list"
+        "http://localhost:51264/api/greader.php/reader/api/0/stream/contents/user/-/state/com.google/reading-list"
     )
     FRESHRSS_AUTH_URL = os.getenv(
         "FRESHRSS_AUTH_URL",
-        "http://1Panel-freshrss-WMI/api/greader.php/accounts/ClientLogin"
+        "http://localhost:51264/api/greader.php/accounts/ClientLogin"
     )
     FRESHRSS_EMAIL = os.getenv("FRESHRSS_EMAIL", "")
     FRESHRSS_PASSWORD = os.getenv("FRESHRSS_PASSWORD", "")
