@@ -17,11 +17,11 @@ class Settings:
     # FreshRSS 配置
     FRESHRSS_URL = os.getenv(
         "FRESHRSS_URL",
-        "http://172.18.0.6/api/greader.php/reader/api/0/stream/contents/user/-/state/com.google/reading-list"
+        "http://1Panel-freshrss-WMI/api/greader.php/reader/api/0/stream/contents/user/-/state/com.google/reading-list"
     )
     FRESHRSS_AUTH_URL = os.getenv(
         "FRESHRSS_AUTH_URL",
-        "http://172.18.0.6/api/greader.php/accounts/ClientLogin"
+        "http://1Panel-freshrss-WMI/api/greader.php/accounts/ClientLogin"
     )
     FRESHRSS_EMAIL = os.getenv("FRESHRSS_EMAIL", "")
     FRESHRSS_PASSWORD = os.getenv("FRESHRSS_PASSWORD", "")
