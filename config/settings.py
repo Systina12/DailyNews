@@ -34,6 +34,13 @@ class Settings:
     )
     DEEPSEEK_TOKEN = os.getenv("DEEPSEEK_TOKEN", "")
     DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    GROK_API_URL = os.getenv(
+        "GROK_API_URL",
+        "https://api.x.ai/v1/chat/completions"
+    )
+    GROK_TOKEN = os.getenv("GROK_TOKEN", os.getenv("XAI_API_KEY", ""))
+    GROK_MODEL = os.getenv("GROK_MODEL", "grok-4-1-fast-non-reasoning")
+    GROK_ONLY = os.getenv("GROK_ONLY", "false").lower() == "true"
 
     # Gemini 配置（使用 google.genai SDK，不需要 API URL）
     GEMINI_TOKEN = os.getenv("GEMINI_TOKEN", "")
@@ -104,6 +111,14 @@ class Settings:
     HEADLINE_BLACKLIST_MIN_FREQ = float(os.getenv("HEADLINE_BLACKLIST_MIN_FREQ", "0.3"))  # 最低频率0.3
     HEADLINE_BLACKLIST_DECAY = float(os.getenv("HEADLINE_BLACKLIST_DECAY", "0.95"))  # 衰减因子0.95
     
+    # 吹哨机制配置
+    ALERT_THRESHOLD = int(os.getenv("ALERT_THRESHOLD", "85"))  # 重大新闻阈值，默认85分
+    ALERT_MAX_PER_CYCLE = int(os.getenv("ALERT_MAX_PER_CYCLE", "10"))  # 每周期最多告警条数
+    
+    # 实时缓存配置
+    REALTIME_CACHE_DIR = DATA_DIR / "realtime_cache"
+    CACHE_RETENTION_HOURS = int(os.getenv("CACHE_RETENTION_HOURS", "24"))  # 缓存保留小时数
+    
     # 批量处理优化配置
     # Gemini 2.5 Flash Lite支持1M tokens上下文窗口，可以处理更大批次
     # 风险评估prompt更简单，可以增加批次大小
@@ -116,17 +131,22 @@ class Settings:
         """确保必要的目录存在"""
         cls.DATA_DIR.mkdir(exist_ok=True)
         cls.LOGS_DIR.mkdir(exist_ok=True)
+        cls.REALTIME_CACHE_DIR.mkdir(exist_ok=True)  # 新增：缓存目录
 
     @classmethod
     def validate(cls):
         """验证必要的配置是否存在"""
         errors = []
 
-        if not cls.DEEPSEEK_TOKEN:
-            errors.append("DEEPSEEK_TOKEN 未设置")
+        if cls.GROK_ONLY:
+            if not cls.GROK_TOKEN:
+                errors.append("GROK_TOKEN 或 XAI_API_KEY 未设置")
+        else:
+            if not cls.DEEPSEEK_TOKEN:
+                errors.append("DEEPSEEK_TOKEN 未设置")
 
-        if not cls.GEMINI_TOKEN:
-            errors.append("GEMINI_TOKEN 未设置")
+            if not cls.GEMINI_TOKEN:
+                errors.append("GEMINI_TOKEN 未设置")
 
         # 验证 FreshRSS 配置（如果需要使用）
         if not cls.FRESHRSS_EMAIL or not cls.FRESHRSS_PASSWORD:

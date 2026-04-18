@@ -17,6 +17,10 @@ def test_settings_has_required_attributes():
     assert hasattr(settings, "DEEPSEEK_API_URL")
     assert hasattr(settings, "GEMINI_TOKEN")
     assert hasattr(settings, "GEMINI_MODEL")
+    assert hasattr(settings, "GROK_API_URL")
+    assert hasattr(settings, "GROK_TOKEN")
+    assert hasattr(settings, "GROK_MODEL")
+    assert hasattr(settings, "GROK_ONLY")
     assert hasattr(settings, "API_TIMEOUT")
     assert hasattr(settings, "DATA_DIR")
     assert hasattr(settings, "LOGS_DIR")
@@ -40,3 +44,4 @@ def test_default_values():
     assert settings.API_TIMEOUT == 60
     assert settings.DEFAULT_TEMPERATURE == 0.3
     assert settings.DEFAULT_MAX_TOKENS == 4000
+    assert settings.GROK_ONLY is False

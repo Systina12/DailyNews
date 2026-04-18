@@ -15,3 +15,11 @@ def get_gemini_token():
     if not token:
         raise ValueError("GEMINI_TOKEN 环境变量未设置")
     return token
+
+
+def get_grok_token():
+    """从环境变量中读取 Grok token"""
+    token = os.getenv('GROK_TOKEN') or os.getenv('XAI_API_KEY')
+    if not token:
+        raise ValueError("GROK_TOKEN 或 XAI_API_KEY 环境变量未设置")
+    return token

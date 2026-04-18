@@ -54,6 +54,25 @@ def run_risk_assessment_pipeline(classified_data):
     
     # 初始化LLM客户端
     llm_client = LLMClient()
+
+    if settings.GROK_ONLY:
+        logger.info("GROK_ONLY 已开启，跳过 ds 风险审查，统一标记为 low")
+        items_with_risk = []
+        for item in items:
+            item_copy = item.copy()
+            item_copy["ds_risk"] = "low"
+            items_with_risk.append(item_copy)
+
+        out = {
+            "section": classified.get("section"),
+            "items": items_with_risk
+        }
+        if category:
+            out["category"] = category
+        if date_str:
+            out["dateStr"] = date_str
+        out["risk_skipped"] = True
+        return out
     
     # 如果新闻数量超过批次大小，需要分批处理
     if item_count > batch_size:

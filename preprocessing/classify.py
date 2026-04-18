@@ -279,13 +279,19 @@ class Classify:
 请严格按照格式输出，每行一条："""
             
             try:
-                # 使用便宜的 Gemini Flash 模型
                 logger.info(f"LLM 批量分类 {len(batch)} 条新闻（批次大小: {batch_size}）...")
-                response = llm_client.request_gemini_flash(
-                    prompt=prompt,
-                    temperature=0.1,  # 低温度，更确定性
-                    max_tokens=500
-                )
+                if settings.GROK_ONLY:
+                    response = llm_client.request_grok(
+                        prompt=prompt,
+                        temperature=0.1,
+                        max_tokens=500
+                    )
+                else:
+                    response = llm_client.request_gemini_flash(
+                        prompt=prompt,
+                        temperature=0.1,  # 低温度，更确定性
+                        max_tokens=500
+                    )
                 
                 # 解析结果
                 for line in response.strip().split('\n'):

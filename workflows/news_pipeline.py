@@ -269,11 +269,18 @@ def _score_with_llm(items, llm_client):
         
         try:
             logger.info(f"LLM 评分 {len(batch)} 条新闻（批次大小: {batch_size}）...")
-            response = llm_client.request_gemini_flash(
-                prompt=prompt,
-                temperature=0.1,
-                max_tokens=500
-            )
+            if settings.GROK_ONLY:
+                response = llm_client.request_grok(
+                    prompt=prompt,
+                    temperature=0.1,
+                    max_tokens=300
+                )
+            else:
+                response = llm_client.request_gemini_flash(
+                    prompt=prompt,
+                    temperature=0.1,
+                    max_tokens=300
+                )
             
             # 解析结果
             scores = {}
