@@ -24,13 +24,15 @@ class RSSClient:
     def _get_freshrss_auth(self):
         logger.info("开始 FreshRSS 认证")
         
-        if not settings.FRESHRSS_EMAIL or not settings.FRESHRSS_PASSWORD:
+        if not settings.FRESHRSS_USERNAME or not settings.FRESHRSS_API_PASSWORD:
             logger.error("FreshRSS 凭证未配置")
-            raise ValueError("FRESHRSS_EMAIL 或 FRESHRSS_PASSWORD 未设置")
+            raise ValueError(
+                "FRESHRSS_USERNAME/FRESHRSS_API_PASSWORD 未设置"
+            )
         
         params = {
-            "Email": settings.FRESHRSS_EMAIL,
-            "Passwd": settings.FRESHRSS_PASSWORD,
+            "Email": settings.FRESHRSS_USERNAME,
+            "Passwd": settings.FRESHRSS_API_PASSWORD,
         }
         
         max_retries = 3

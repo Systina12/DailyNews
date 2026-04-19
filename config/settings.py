@@ -51,6 +51,8 @@ class Settings:
         "FRESHRSS_AUTH_URL",
         "http://localhost:51264/api/greader.php/accounts/ClientLogin"
     )
+    FRESHRSS_USERNAME = os.getenv("FRESHRSS_USERNAME", os.getenv("FRESHRSS_EMAIL", ""))
+    FRESHRSS_API_PASSWORD = os.getenv("FRESHRSS_API_PASSWORD", os.getenv("FRESHRSS_PASSWORD", ""))
     FRESHRSS_EMAIL = os.getenv("FRESHRSS_EMAIL", "")
     FRESHRSS_PASSWORD = os.getenv("FRESHRSS_PASSWORD", "")
 
@@ -184,8 +186,8 @@ class Settings:
                 errors.append("GEMINI_TOKEN 未设置")
 
         # 验证 FreshRSS 配置（如果需要使用）
-        if not cls.FRESHRSS_EMAIL or not cls.FRESHRSS_PASSWORD:
-            errors.append("FRESHRSS_EMAIL 或 FRESHRSS_PASSWORD 未设置")
+        if not cls.FRESHRSS_USERNAME or not cls.FRESHRSS_API_PASSWORD:
+            errors.append("FRESHRSS_USERNAME/FRESHRSS_API_PASSWORD 未设置（兼容旧变量 FRESHRSS_EMAIL/FRESHRSS_PASSWORD）")
 
         # 验证超时配置
         if cls.API_TIMEOUT <= 0:
