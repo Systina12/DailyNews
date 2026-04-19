@@ -116,6 +116,25 @@ HEADLINE_TEMPLATE = """你是一名严谨的中文新闻编辑，请用简体中
 {news_items}"""
 
 
+ALERT_LOCALIZATION_TEMPLATE = """你是一名严谨的中文新闻编辑，请把以下重大新闻告警素材整理成简体中文。
+
+【写作要求】
+1) 标题必须是自然、准确、简洁的简体中文
+2) 摘要必须是1到2句简体中文，不评论、不预测、不脑补
+3) 只能依据给出的标题与摘要改写，不得添加新事实
+4) 人名、地名、机构名优先使用常见中文译名；必要时可保留英文缩写
+5) 不得输出整句英文、俄文或其他外文
+
+【输出格式】
+- 严格逐行输出
+- 每行格式必须是：编号|中文标题|中文摘要
+- 不要输出任何额外解释、前言或 Markdown
+
+以下是待处理的新闻素材：
+
+{news_items}"""
+
+
 
 # ========== Prompt 构建函数 ==========
 
@@ -260,4 +279,44 @@ def build_headline_prompt(input_block, risk_filter="low"):
             "filtered": len(news_lines),
             "risk_filter": risk_filter,
         },
+    }
+
+
+def build_alert_localization_prompt(alerts):
+    """
+    构建吹哨邮件中文化 prompt。
+
+    Args:
+        alerts: 需要中文化的告警列表
+
+    Returns:
+        dict | None: 包含 prompt 和 meta；若没有可处理项则返回 None
+    """
+    if not alerts:
+        return None
+
+    news_lines = []
+    for idx, alert in enumerate(alerts, start=1):
+        title = _clean_text(alert.get("title"))
+        summary = _clean_text(alert.get("summary"))
+
+        if not title:
+            continue
+
+        if len(summary) > 400:
+            summary = summary[:400] + "..."
+
+        news_lines.append(
+            f"{idx}. 标题：{title}\n"
+            f"   摘要：{summary}"
+        )
+
+    if not news_lines:
+        return None
+
+    return {
+        "prompt": ALERT_LOCALIZATION_TEMPLATE.format(
+            news_items="\n\n".join(news_lines)
+        ),
+        "meta": {"count": len(news_lines)},
     }

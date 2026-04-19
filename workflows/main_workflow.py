@@ -3,11 +3,13 @@
 """
 import os
 import argparse
+import re
 from datetime import datetime
 from typing import List, Dict
 
 from config import settings
 from monitoring.metrics import metrics
+from llms.build_prompt import build_alert_localization_prompt
 from workflows.news_pipeline import run_news_pipeline_all
 from workflows.news_pipeline import _score_with_llm
 from workflows.risk_assessment import run_risk_assessment_pipeline
@@ -28,6 +30,80 @@ def _safe_filename(s: str) -> str:
     for ch in bad:
         out = out.replace(ch, "_")
     return out
+
+
+def _contains_chinese(text: str) -> bool:
+    """判断文本中是否包含中文字符。"""
+    return bool(text and re.search(r"[\u4e00-\u9fff]", text))
+
+
+def _localize_alerts_with_llm(alerts: List[Dict], llm_client) -> List[Dict]:
+    """
+    将吹哨邮件中的标题/摘要批量转成简体中文。
+    只对明显不是中文的内容做转换，避免额外污染原本已是中文的条目。
+    """
+    if not alerts:
+        return alerts
+
+    indexed_alerts = []
+    for idx, alert in enumerate(alerts, start=1):
+        title = (alert.get("title") or "").strip()
+        summary = (alert.get("summary") or "").strip()
+        needs_localize = not _contains_chinese(title) or (summary and not _contains_chinese(summary))
+        indexed_alerts.append((idx, alert, title, summary, needs_localize))
+
+    if not any(item[4] for item in indexed_alerts):
+        return alerts
+
+    to_localize = []
+    for _, alert, _, _, needs_localize in indexed_alerts:
+        if needs_localize:
+            to_localize.append(alert)
+
+    prompt_data = build_alert_localization_prompt(to_localize)
+    if not prompt_data:
+        return alerts
+
+    try:
+        response_data = llm_client.request_with_fallback(
+            prompt=prompt_data["prompt"],
+            primary="deepseek",
+            temperature=0.2,
+            max_tokens=2000,
+        )
+        response = response_data.get("content", "") or ""
+    except Exception as e:
+        logger.warning(f"吹哨邮件中文化失败，保留原始标题/摘要: {e}")
+        return alerts
+
+    localized_map = {}
+    for line in response.splitlines():
+        line = line.strip()
+        if not line or "|" not in line:
+            continue
+        parts = [part.strip() for part in line.split("|", 2)]
+        if len(parts) != 3:
+            continue
+        try:
+            idx = int(parts[0])
+        except ValueError:
+            continue
+        localized_map[idx] = {
+            "localized_title": parts[1],
+            "localized_summary": parts[2],
+        }
+
+    localized_counter = 0
+    for idx, alert, _, _, needs_localize in indexed_alerts:
+        if not needs_localize:
+            alert["localized_title"] = alert.get("title", "")
+            alert["localized_summary"] = alert.get("summary", "")
+            continue
+        localized_counter += 1
+        if localized_counter in localized_map:
+            alert.update(localized_map[localized_counter])
+
+    return alerts
 
 
 def run_main_workflow(categories=None, hours: float = 24, test: bool = False, grok_only: bool = False):
@@ -225,6 +301,7 @@ def run_realtime_workflow(
             logger.info(f"检测到 {alert_count} 条重大新闻需要吹哨告警")
 
             try:
+                pending_alerts = _localize_alerts_with_llm(pending_alerts, llm_client)
                 _send_major_news_alerts(pending_alerts, threshold=threshold, test=test)
                 alert_ids = [alert["id"] for alert in pending_alerts]
                 cache_manager.mark_alerts_sent(alert_ids)
@@ -280,8 +357,8 @@ def _build_alert_email(alerts: List[Dict], threshold: int) -> str:
     for alert in sorted_alerts:
         score = alert.get("importance_score", alert.get("score", 0))
         category = alert.get("category", "")
-        title = alert.get("title", "")
-        summary = alert.get("summary", "")
+        title = alert.get("localized_title") or alert.get("title", "")
+        summary = alert.get("localized_summary") or alert.get("summary", "")
         raw_data = alert.get("raw_data", {}) or {}
         link = raw_data.get("link", "")
         if not link:
