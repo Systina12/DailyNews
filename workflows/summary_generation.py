@@ -13,6 +13,38 @@ from utils.logger import get_logger
 logger = get_logger("summary_generation")
 
 
+def _looks_non_chinese(html: str) -> bool:
+    """
+    粗略判断摘要是否明显不是中文。
+    忽略 HTML 标签后，若英文字母显著多于中文字符，则认为需要重试。
+    """
+    if not html:
+        return False
+
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text)
+
+    cjk_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+    latin_count = len(re.findall(r"[A-Za-z]", text))
+
+    if cjk_count == 0 and latin_count > 30:
+        return True
+
+    return latin_count > cjk_count * 1.2
+
+
+def _strengthen_chinese_requirement(prompt: str) -> str:
+    """为摘要生成追加更强的中文输出约束。"""
+    extra_rules = """
+
+【最终输出强约束】
+- 最终输出必须是简体中文 HTML
+- 任何新闻内容都必须翻译成中文，不允许整段英文、俄文或其他外文直接出现在正文中
+- 如果输出中出现大段外文，视为答案错误，请重写为中文
+"""
+    return prompt + extra_rules
+
+
 def _format_html_title(category: str, date_str: str | None, hour_str: str) -> str:
     """
     输出格式：YY-MM-DD-HH-栏目
@@ -121,6 +153,22 @@ def run_summary_generation_pipeline(risk_annotated_data):
             "filter_reason": resp.get("filter_reason"),
         }
 
+        if _looks_non_chinese(low_risk_summary):
+            logger.warning("低风险摘要检测到外文占比过高，追加中文强约束后重试一次")
+            retry_prompt = _strengthen_chinese_requirement(low_prompt_data["prompt"])
+            retry_resp = llm_client.request_with_fallback(
+                prompt=retry_prompt,
+                primary="deepseek",
+                temperature=0.2,
+                max_tokens=4000,
+            )
+            low_risk_summary = retry_resp.get("content", "") or low_risk_summary
+            low_meta = {
+                "model_used": retry_resp.get("model_used"),
+                "is_fallback": bool(retry_resp.get("is_fallback")),
+                "filter_reason": retry_resp.get("filter_reason"),
+            }
+
         logger.info(f"✓ 低风险摘要生成完成，模型: {low_meta['model_used']}, fallback: {low_meta['is_fallback']}")
     else:
         logger.info("低风险新闻为空，跳过低风险摘要生成")
@@ -147,6 +195,15 @@ def run_summary_generation_pipeline(risk_annotated_data):
             temperature=0.3,
             max_tokens=4000,
         ) or ""
+
+        if _looks_non_chinese(high_risk_summary):
+            logger.warning("高风险摘要检测到外文占比过高，追加中文强约束后重试一次")
+            retry_prompt = _strengthen_chinese_requirement(high_prompt_data["prompt"])
+            high_risk_summary = llm_client.request_gemini(
+                prompt=retry_prompt,
+                temperature=0.2,
+                max_tokens=4000,
+            ) or high_risk_summary
 
         logger.info("✓ 高风险摘要生成完成")
     else:
