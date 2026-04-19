@@ -15,15 +15,52 @@ class Classify:
     """
     新闻分类器
     流程：硬排除 → 分类（头条需额外检查软内容）→ 筛选
-    支持6个类别：头条、政治、军事、财经、科技、国际
+    支持6个类别：头条、国际财经、中国财经、科技、战争、国际
     """
 
     def __init__(self, category):
         """
         Args:
-            category: 要提取的类别（头条/政治/军事/财经/科技/国际）
+            category: 要提取的类别（头条/国际财经/中国财经/科技/战争/国际）
         """
         self.category = category
+
+    @staticmethod
+    def _collect_full_text(item):
+        """收集标题、摘要、来源和分类文本，便于规则分类复用。"""
+        title = (item.get("title") or "").lower()
+        src = (item.get("origin", {}).get("title") or "").lower()
+        categories = item.get("categories", [])
+        cats = " ".join(str(c).lower() for c in categories)
+        summary = (item.get("summaryText") or "")[:300].lower()
+        return title, src, cats, summary, f"{title} {summary} {src} {cats}"
+
+    @staticmethod
+    def _is_china_related_text(text):
+        """判断文本是否明显与中国经济圈相关。"""
+        china_keywords = [
+            "china", "chinese", "beijing", "shanghai", "shenzhen", "hong kong",
+            "mainland", "pboc", "人民银行", "中国", "中国大陆", "内地", "北京", "上海", "深圳",
+            "香港", "港股", "a股", "沪深", "人民币", "央行", "中概股", "沪指", "深成指",
+        ]
+        return any(Classify._text_contains_keyword(text, keyword) for keyword in china_keywords)
+
+    @staticmethod
+    def _text_contains_keyword(text, keyword):
+        """英文关键词按词边界匹配，中文关键词按子串匹配。"""
+        if not keyword:
+            return False
+
+        if re.fullmatch(r"[a-z0-9 ]+", keyword):
+            pattern = rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])"
+            return re.search(pattern, text) is not None
+
+        return keyword in text
+
+    @staticmethod
+    def _count_keyword_matches(text, keywords):
+        """统计命中的关键词个数，避免英文子串误判。"""
+        return sum(1 for kw in keywords if Classify._text_contains_keyword(text, kw))
 
     def _is_hard_excluded(self, item):
         """硬排除：娱乐、体育、节目等明确不要的内容"""
@@ -107,21 +144,14 @@ class Classify:
     def _classify_item(self, item):
         """
         将新闻分类到6个类别之一
-        分类优先级：头条 > 政治 > 军事 > 财经 > 科技 > 国际
-        
+        分类优先级：头条 > 战争 > 中国财经 > 国际财经 > 科技 > 国际
+
         注意：俄罗斯新闻已在 filter_ru 中过滤，这里按内容正常分类
-        
+
         Returns:
             tuple: (category, confidence) 类别和置信度(0-1)
         """
-        title = (item.get("title") or "").lower()
-        src = (item.get("origin", {}).get("title") or "").lower()
-        categories = item.get("categories", [])
-        cats = " ".join(str(c).lower() for c in categories)
-        
-        # 获取摘要用于辅助判断
-        summary = (item.get("summaryText") or "")[:200].lower()
-        full_text = f"{title} {summary}"
+        title, src, cats, summary, full_text = self._collect_full_text(item)
 
         # 1. 头条：来源标记为top 且 不是软内容
         if ("top" in src or "top" in cats or "头条" in src or "头条" in cats):
@@ -130,85 +160,73 @@ class Classify:
             else:
                 return "头条", 0.5  # 软内容降低置信度
 
-        # 2. 政治
-        political_keywords = [
-            "election", "vote", "parliament", "government", "president", "prime minister",
-            "policy", "sanction", "cabinet", "congress", "senate", "politic", "minister",
-            "law", "legislation", "treaty", "diplomat", "kremlin", "putin",
-            "选举", "政府", "总统", "议会", "内阁", "制裁", "部长", "法律", "立法", "普京", "克里姆林宫",
-        ]
-        political_sources = ["politics", "politica", "政治"]
-        
-        keyword_match = sum(1 for kw in political_keywords if kw in full_text)
-        source_match = any(s in src for s in political_sources)
-        
-        if source_match:
-            return "政治", 0.9  # 来源明确，高置信度
-        elif keyword_match >= 3:
-            return "政治", 0.85  # 多个关键词
-        elif keyword_match == 2:
-            return "政治", 0.75  # 两个关键词，刚好达到阈值
-        elif keyword_match == 1:
-            return "政治", 0.6  # 单个关键词，置信度中等
-
-        # 3. 军事
-        military_keywords = [
+        # 2. 战争
+        war_keywords = [
             "military", "war", "army", "navy", "air force", "defense", "weapon", "missile",
             "attack", "strike", "combat", "soldier", "troop", "battle", "conflict",
             "nato", "pentagon", "drone", "fighter", "tank", "submarine", "aircraft carrier",
             "nuclear", "bomb", "explosion", "warfare", "invasion", "occupation",
+            "ceasefire", "frontline", "shelling", "airstrike", "mobilization",
             "军事", "战争", "军队", "海军", "空军", "国防", "武器", "导弹",
             "攻击", "袭击", "战斗", "士兵", "部队", "冲突", "北约", "无人机", "战机", "坦克", "潜艇", "航母",
-            "核武器", "炸弹", "爆炸", "入侵", "占领",
+            "核武器", "炸弹", "爆炸", "入侵", "占领", "停火", "前线", "炮击", "空袭", "动员",
         ]
-        military_sources = ["military", "defense", "guerra", "军事", "国防"]
-        
-        keyword_match = sum(1 for kw in military_keywords if kw in full_text)
-        source_match = any(s in src for s in military_sources)
-        
-        if source_match:
-            return "军事", 0.9  # 来源明确，高置信度
-        elif keyword_match >= 3:
-            return "军事", 0.85  # 多个关键词
-        elif keyword_match == 2:
-            return "军事", 0.75  # 两个关键词
-        elif keyword_match == 1:
-            return "军事", 0.6  # 单个关键词
+        war_sources = ["military", "defense", "guerra", "war", "军事", "国防", "冲突"]
 
-        # 4. 财经
+        keyword_match = self._count_keyword_matches(full_text, war_keywords)
+        source_match = any(s in src for s in war_sources)
+
+        if source_match:
+            return "战争", 0.9  # 来源明确，高置信度
+        elif keyword_match >= 3:
+            return "战争", 0.85  # 多个关键词
+        elif keyword_match == 2:
+            return "战争", 0.75  # 两个关键词
+        elif keyword_match == 1:
+            return "战争", 0.6  # 单个关键词
+
+        # 3. 财经：先判断是不是财经，再拆成中国财经/国际财经
         econ_keywords = [
             "economy", "economic", "market", "stock", "inflation", "bank", "finance", "business",
             "trade", "tariff", "gdp", "debt", "bond", "currency", "dollar", "euro", "oil", "gas", "energy",
+            "earnings", "revenue", "profit", "ipo", "investment", "fund", "treasury", "yield",
             "economia", "borsa", "mercato", "finanza",
             "经济", "股市", "通胀", "银行", "贸易", "关税", "债务", "货币", "石油", "天然气", "能源",
+            "财报", "营收", "利润", "上市", "融资", "基金", "国债", "收益率",
         ]
-        econ_sources = ["business", "economia", "finance", "财经", "经济"]
-        
-        keyword_match = sum(1 for kw in econ_keywords if kw in full_text)
-        source_match = any(s in src for s in econ_sources)
-        
-        if source_match:
-            return "财经", 0.9
-        elif keyword_match >= 3:
-            return "财经", 0.85
-        elif keyword_match == 2:
-            return "财经", 0.75
-        elif keyword_match == 1:
-            return "财经", 0.6
+        econ_sources = ["business", "economia", "finance", "财经", "经济", "markets", "market"]
 
-        # 5. 科技
+        keyword_match = self._count_keyword_matches(full_text, econ_keywords)
+        source_match = any(s in src for s in econ_sources)
+        if source_match or keyword_match >= 1:
+            china_related = self._is_china_related_text(full_text)
+            if china_related:
+                confidence = 0.9 if source_match else 0.85 if keyword_match >= 3 else 0.75
+                return "中国财经", confidence
+
+            if source_match:
+                return "国际财经", 0.9
+            elif keyword_match >= 3:
+                return "国际财经", 0.85
+            elif keyword_match == 2:
+                return "国际财经", 0.75
+            elif keyword_match == 1:
+                return "国际财经", 0.6
+
+        # 4. 科技
         tech_keywords = [
             "tech", "technology", "ai", "artificial intelligence", "software", "chip",
             "science", "research", "innovation", "startup", "app", "digital",
             "computer", "internet", "cyber", "data", "algorithm",
+            "semiconductor", "robot", "satellite", "space", "quantum",
             "scienza", "tecnologia", "ricerca",
-            "科技", "人工智能", "半导体", "软件", "芯片", "研究", "创新",
+            "科技", "人工智能", "半导体", "软件", "芯片", "研究", "创新", "机器人", "卫星", "航天", "量子",
         ]
         tech_sources = ["tech", "science", "scienza", "technology", "科技"]
-        
-        keyword_match = sum(1 for kw in tech_keywords if kw in full_text)
+
+        keyword_match = self._count_keyword_matches(full_text, tech_keywords)
         source_match = any(s in src for s in tech_sources)
-        
+
         if source_match:
             return "科技", 0.9
         elif keyword_match >= 3:
@@ -218,7 +236,7 @@ class Classify:
         elif keyword_match == 1:
             return "科技", 0.6
 
-        # 6. 国际（兜底）
+        # 5. 国际（兜底，含大部分政治/外交/社会国际新闻）
         return "国际", 0.4  # 兜底分类，置信度低
 
     def _batch_classify_with_llm(self, items: List[Dict]) -> List[Dict]:
@@ -258,23 +276,23 @@ class Classify:
             
             prompt += """对每条新闻返回：编号|类别|是否噪音
 
-类别选项：头条/政治/军事/财经/科技/国际
-是否噪音：yes（娱乐、体育、生活、文化类）/ no（政治、经济、科技、军事、国际新闻）
+类别选项：头条/国际财经/中国财经/科技/战争/国际
+是否噪音：yes（娱乐、体育、生活、文化类）/ no（财经、科技、战争、外交、国际新闻）
 
 判断标准：
-- 头条：重大突发事件、高层政治动态
-- 政治：选举、政府、议会、政策、制裁
-- 军事：战争、军队、武器、导弹、攻击、冲突
-- 财经：经济、市场、股市、通胀、银行
+- 头条：重大突发事件、最高优先级新闻
+- 战争：战争、军队、武器、导弹、攻击、冲突
+- 中国财经：中国大陆/香港相关的经济、市场、股市、银行、政策、产业新闻
+- 国际财经：除中国经济圈外的经济、市场、股市、通胀、银行新闻
 - 科技：技术、AI、软件、芯片、科学
-- 国际：其他国际新闻
+- 国际：其他国际新闻，包括政治、外交、社会、灾难等
 - 噪音：娱乐、体育、旅游、美食、时尚、天气、星座
 
 示例输出：
-1|政治|no
-2|军事|no
+1|国际|no
+2|战争|no
 3|头条|yes
-4|财经|no
+4|中国财经|no
 
 请严格按照格式输出，每行一条："""
             

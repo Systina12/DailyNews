@@ -115,14 +115,14 @@ def run_main_workflow(categories=None, hours: float = 24, test: bool = False, gr
     - CLI 层面的 --mode 逻辑仅影响 __main__ 分支，避免破坏既有调用方式
 
     Args:
-        categories: 分类列表，默认 ["头条","政治","财经","科技","军事","国际"]
+        categories: 分类列表，默认 ["头条","国际财经","中国财经","科技","战争","国际"]
         hours: 拉取最近多少小时的新闻（默认 24）
     """
     settings.ensure_directories()
     settings.set_runtime_flags(grok_only=bool(grok_only or settings.GROK_ONLY))
     settings.validate()
 
-    default_categories = ["头条", "政治", "财经", "科技", "军事", "国际"]
+    default_categories = ["头条", "国际财经", "中国财经", "科技", "战争", "国际"]
     categories = categories or default_categories
 
     # 用“精确到秒”的时间戳做本次运行的输出文件后缀
@@ -239,7 +239,7 @@ def run_realtime_workflow(
     settings.set_runtime_flags(grok_only=bool(grok_only or settings.GROK_ONLY))
     settings.validate()
 
-    default_categories = ["头条", "政治", "财经", "科技", "军事", "国际"]
+    default_categories = ["头条", "国际财经", "中国财经", "科技", "战争", "国际"]
     categories = categories or default_categories
     threshold = importance_threshold if importance_threshold is not None else settings.ALERT_THRESHOLD
 
@@ -406,7 +406,7 @@ def _parse_args():
         "--categories",
         type=str,
         default="",
-        help='分类列表，逗号分隔，例如： "头条,政治,财经,科技,军事"；不传则用默认分类',
+        help='分类列表，逗号分隔，例如： "头条,国际财经,中国财经,科技,战争,国际"；不传则用默认分类',
     )
     p.add_argument(
         "--mode",

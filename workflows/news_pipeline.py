@@ -9,7 +9,7 @@ from utils.logger import get_logger
 
 logger = get_logger("news_pipeline")
 
-DEFAULT_CATEGORIES = ["头条", "政治", "财经", "科技", "军事", "国际"]
+DEFAULT_CATEGORIES = ["头条", "国际财经", "中国财经", "科技", "战争", "国际"]
 
 
 def _load_learned_blacklist():
@@ -596,7 +596,7 @@ def _apply_headline_limit(headline_items, hours: float):
 
 def _apply_secondary_category_limit(items, category: str, hours: float):
     """
-    对次级分类（政治/财经/科技/军事）应用智能水位线
+    对次级分类（国际财经/中国财经/科技/战争）应用智能水位线
     
     策略：
     - 数量少的栏目不削减（避免过度削减科技等小栏目）
@@ -735,7 +735,7 @@ def run_news_pipeline_all(categories=None, hours: float = 24):
     
     分层过滤策略：
     1. 头条（最严格）：按重要性保留，不够重要的下放到次级分类
-    2. 政治/财经/科技/军事（次级）：相对宽松（1.5倍水位线），过于不重要的下放到国际
+    2. 国际财经/中国财经/科技/战争（次级）：相对宽松（1.5倍水位线），过于不重要的下放到国际
     3. 国际（兜底）：与头条同级水位线，完全不重要的直接丢弃
     """
     from preprocessing.normalize import normalize_items
@@ -753,7 +753,7 @@ def run_news_pipeline_all(categories=None, hours: float = 24):
     dropped_from_secondary = []  # 从次级分类下放的
     
     # 定义次级分类
-    secondary_categories = ["政治", "财经", "科技", "军事"]
+    secondary_categories = ["国际财经", "中国财经", "科技", "战争"]
     
     # 第一轮：处理所有分类
     for cat in categories:
