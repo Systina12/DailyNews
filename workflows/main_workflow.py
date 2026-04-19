@@ -9,6 +9,7 @@ from typing import List, Dict
 from config import settings
 from monitoring.metrics import metrics
 from workflows.news_pipeline import run_news_pipeline_all
+from workflows.news_pipeline import _score_with_llm
 from workflows.risk_assessment import run_risk_assessment_pipeline
 from workflows.summary_generation import run_summary_generation_pipeline
 from utils.email_sender import send_html_email
@@ -42,7 +43,7 @@ def run_main_workflow(categories=None, hours: float = 24, test: bool = False, gr
         hours: 拉取最近多少小时的新闻（默认 24）
     """
     settings.ensure_directories()
-    settings.GROK_ONLY = bool(grok_only or settings.GROK_ONLY)
+    settings.set_runtime_flags(grok_only=bool(grok_only or settings.GROK_ONLY))
     settings.validate()
 
     default_categories = ["头条", "政治", "财经", "科技", "军事", "国际"]
@@ -142,7 +143,13 @@ def run_main_workflow(categories=None, hours: float = 24, test: bool = False, gr
     }
 
 
-def run_realtime_workflow(categories=None, hours: float = 0.25, grok_only: bool = False):  # 默认15分钟
+def run_realtime_workflow(
+    categories=None,
+    hours: float = 0.25,
+    importance_threshold: int | None = None,
+    test: bool = False,
+    grok_only: bool = False,
+):  # 默认15分钟
     """
     实时预热工作流（15分钟任务）
     
@@ -153,70 +160,53 @@ def run_realtime_workflow(categories=None, hours: float = 0.25, grok_only: bool 
     4. 检查并发送吹哨告警
     """
     settings.ensure_directories()
-    settings.GROK_ONLY = bool(grok_only or settings.GROK_ONLY)
+    settings.set_runtime_flags(grok_only=bool(grok_only or settings.GROK_ONLY))
     settings.validate()
 
     default_categories = ["头条", "政治", "财经", "科技", "军事", "国际"]
     categories = categories or default_categories
+    threshold = importance_threshold if importance_threshold is not None else settings.ALERT_THRESHOLD
 
     logger.info(
-        f"开始实时监控工作流（realtime），多分类: {categories}，hours={hours}，阈值={importance_threshold}，test={test}"
+        f"开始实时监控工作流（realtime），多分类: {categories}，hours={hours}，阈值={threshold}，test={test}"
     )
 
-    # 1. 拉取新闻
-    rss = RSSClient()
-    raw_data = rss.get_news(hours=hours)
-    filtered = filter_ru(raw_data)
-    deduped = dedupe_items(filtered)
-    raw_items = deduped.get("items", [])
-    
-    if not raw_items:
-        logger.info("没有拉取到新新闻")
-        return {"new_count": 0, "major_alerts": 0}
-    
-    logger.info(f"拉取到 {len(raw_items)} 条新闻")
-    
-    # 2. 初始化缓存管理器
+    blocks = run_news_pipeline_all(categories=categories, hours=hours)
     cache_manager = CacheManager()
-    
-    # 3. 对每个分类进行处理
+
+    # 运行前先清理过期缓存
+    cache_manager.cleanup_old_cache()
+
     from llms.llms import LLMClient
     llm_client = LLMClient()
-    
+
     total_processed = 0
     all_major_alerts = []
-    
-    for category in categories:
-        # 分类
-        classifier = Classify(category=category)
-        block = classifier._process_headlines(raw_items)
+
+    for block in blocks:
+        category = block.get("category", "unknown")
         classified_items = block.get("items", [])
-        
+
         if not classified_items:
             logger.info(f"分类 [{category}] 无新闻，跳过")
             continue
-        
+
         logger.info(f"分类 [{category}] 处理 {len(classified_items)} 条新闻")
-        
-        # 重要性评分（复用现有逻辑）
-        from workflows.news_pipeline import _score_with_llm
+
         items_with_scores = _score_with_llm(classified_items, llm_client)
-        
+
         if not items_with_scores:
             logger.warning(f"分类 [{category}] 评分失败")
             continue
-        
-        # 提取评分
+
         items = [item for item, _ in items_with_scores]
         scores = [score for _, score in items_with_scores]
-        
-        # 保存到缓存
+
         cache_manager.save_news_items(items, category, scores)
         total_processed += len(items)
-        
-        # 收集重大新闻（用于吹哨）
+
         for item, score in items_with_scores:
-            if score >= settings.ALERT_THRESHOLD:
+            if score >= threshold:
                 item_id = cache_manager._generate_item_id(item)
                 all_major_alerts.append({
                     "id": item_id,
@@ -226,44 +216,37 @@ def run_realtime_workflow(categories=None, hours: float = 0.25, grok_only: bool 
                     "importance_score": score,
                     "raw_data": item
                 })
-    
-    # 4. 检查并发送吹哨告警
     alert_count = 0
     if all_major_alerts:
-        # 获取需要发送的告警（过滤已发送的）
         pending_alerts = cache_manager.get_major_alerts()
-        
+
         if pending_alerts:
             alert_count = len(pending_alerts)
             logger.info(f"检测到 {alert_count} 条重大新闻需要吹哨告警")
-            
-            # 发送吹哨邮件
+
             try:
-                _send_major_news_alerts(pending_alerts)
-                
-                # 标记为已发送
+                _send_major_news_alerts(pending_alerts, threshold=threshold, test=test)
                 alert_ids = [alert["id"] for alert in pending_alerts]
                 cache_manager.mark_alerts_sent(alert_ids)
-                
                 logger.info(f"吹哨告警邮件已发送 ({alert_count} 条)")
             except Exception as e:
                 logger.error(f"发送吹哨告警失败: {e}")
         else:
             logger.info("重大新闻已发送过告警，跳过")
-    
-    # 5. 获取统计信息
+
     stats = cache_manager.get_cache_stats()
-    
+
     logger.info("=" * 60)
     logger.info(f"实时预热完成：处理 {total_processed} 条新闻")
     logger.info(f"重大新闻：{len(all_major_alerts)} 条，吹哨告警：{alert_count} 条")
     logger.info(f"缓存统计：{stats['total_items']} 条新闻，{stats['unused_items']} 条未使用")
     logger.info("=" * 60)
-    
+
     return {
         "processed": total_processed,
         "major_news": len(all_major_alerts),
         "alerts_sent": alert_count,
+        "important_news": all_major_alerts,
         "stats": stats
     }
 
@@ -273,28 +256,66 @@ def run_hourly_workflow(categories=None, hours: float = 1, test: bool = False, g
     return run_main_workflow(categories=categories, hours=hours, test=test, grok_only=grok_only)
 
 
-def _send_major_news_alerts(alerts: List[Dict]):
+def _build_alert_email(alerts: List[Dict], threshold: int) -> str:
+    """构建重大新闻告警邮件 HTML。"""
+    current_time = datetime.now().strftime("%H:%M")
+    sorted_alerts = sorted(
+        alerts,
+        key=lambda item: item.get("importance_score", item.get("score", 0)),
+        reverse=True,
+    )
+
+    lines = [
+        "<!DOCTYPE html>",
+        "<html><head><meta charset=\"UTF-8\"></head>",
+        "<body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #222;\">",
+        "<div style=\"max-width: 900px; margin: 0 auto;\">",
+        "<h1 style=\"color: #b00020;\">重大新闻告警</h1>",
+        (
+            f"<p>时间：{current_time} | 检测到 <strong>{len(sorted_alerts)}</strong> 条 "
+            f"重要性评分不低于 <strong>{threshold}</strong> 分的新闻。</p>"
+        ),
+    ]
+
+    for alert in sorted_alerts:
+        score = alert.get("importance_score", alert.get("score", 0))
+        category = alert.get("category", "")
+        title = alert.get("title", "")
+        summary = alert.get("summary", "")
+        raw_data = alert.get("raw_data", {}) or {}
+        link = raw_data.get("link", "")
+        if not link:
+            alternate = raw_data.get("alternate")
+            if isinstance(alternate, list) and alternate:
+                link = alternate[0].get("href", "")
+        if not link:
+            canonical = raw_data.get("canonical")
+            if isinstance(canonical, list) and canonical:
+                link = canonical[0].get("href", "")
+
+        lines.append("<div style=\"border: 1px solid #ddd; border-left: 6px solid #b00020; padding: 16px; margin: 16px 0;\">")
+        lines.append(f"<div style=\"font-weight: bold; margin-bottom: 8px;\">[{score}分] [{category}]</div>")
+        lines.append(f"<div style=\"font-size: 18px; margin-bottom: 8px;\">{title}</div>")
+        if summary:
+            lines.append(f"<div style=\"color: #555; margin-bottom: 8px;\">{summary}</div>")
+        if link:
+            lines.append(f"<div><a href=\"{link}\">查看原文</a></div>")
+        lines.append("</div>")
+
+    lines.append("</div></body></html>")
+    return "\n".join(lines)
+
+
+def _send_major_news_alerts(alerts: List[Dict], threshold: int, test: bool = False):
     """发送重大新闻告警邮件"""
     if not alerts:
         return
 
     current_time = datetime.now()
     time_str = current_time.strftime("%H:%M")
-    alert_subject = f" 重大新闻告警 ({time_str})"
-
-    lines = [
-        "<!DOCTYPE html>",
-        "<html><head><meta charset=\"UTF-8\"></head><body>",
-        f"<h1>{alert_subject}</h1>",
-    ]
-    for alert in alerts:
-        lines.append(
-            f"<p><b>{alert.get('category', '')}</b> - {alert.get('title', '')}<br>"
-            f"{alert.get('summary', '')}</p>"
-        )
-    lines.append("</body></html>")
-
-    send_html_email(subject=alert_subject, html_body="\n".join(lines), test_mode=False)
+    alert_subject = f"重大新闻告警 ({time_str})"
+    html_body = _build_alert_email(alerts, threshold)
+    send_html_email(subject=alert_subject, html_body=html_body, test_mode=test)
 
 def _parse_args():
     p = argparse.ArgumentParser(description="DailyNews 主工作流（多分类）")
@@ -323,6 +344,12 @@ def _parse_args():
         help="测试模式：只把邮件发送到 TEST_EMAIL/TEST-EMAIL 环境变量指定的地址",
     )
     p.add_argument(
+        "--threshold",
+        type=int,
+        default=None,
+        help="实时吹哨模式的重要性阈值；不传则使用 ALERT_THRESHOLD",
+    )
+    p.add_argument(
         "--grok-only",
         action="store_true",
         help="只使用 Grok：跳过 ds 风险审查，并将原有 Gemini/DeepSeek 调用切到 Grok",
@@ -337,8 +364,13 @@ if __name__ == "__main__":
         # 原有行为：完整跑一遍（保持向后兼容）
         run_main_workflow(categories=cats, hours=args.hours, test=args.test, grok_only=args.grok_only)
     elif args.mode == "realtime":
-        # 轻量实时预热：仅拉取+分类，后续可在此接入缓存/吹哨
-        run_realtime_workflow(categories=cats, hours=args.hours, grok_only=args.grok_only)
+        run_realtime_workflow(
+            categories=cats,
+            hours=args.hours,
+            importance_threshold=args.threshold,
+            test=args.test,
+            grok_only=args.grok_only,
+        )
     elif args.mode == "hourly":
         # 小时报：当前等价于完整主流程，未来可在此复用缓存结果
         run_hourly_workflow(categories=cats, hours=args.hours, test=args.test, grok_only=args.grok_only)

@@ -8,6 +8,33 @@ import os
 from pathlib import Path
 
 
+def _load_project_env():
+    """从项目根目录加载 .env，不覆盖已存在的环境变量。"""
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if not key:
+            continue
+
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+
+        os.environ.setdefault(key, value)
+
+
+_load_project_env()
+
+
 class Settings:
     """应用配置类"""
 
@@ -125,6 +152,14 @@ class Settings:
     RISK_BATCH_SIZE = int(os.getenv("RISK_BATCH_SIZE", "200"))  # 从隐式100增加到200
     CLASSIFY_BATCH_SIZE = int(os.getenv("CLASSIFY_BATCH_SIZE", "100"))  # 保持100
     SCORING_BATCH_SIZE = int(os.getenv("SCORING_BATCH_SIZE", "100"))  # 保持100
+
+    @classmethod
+    def set_runtime_flags(cls, *, grok_only: bool | None = None):
+        """设置运行时开关，并同步到类属性和环境变量。"""
+        if grok_only is not None:
+            value = bool(grok_only)
+            cls.GROK_ONLY = value
+            os.environ["GROK_ONLY"] = "true" if value else "false"
 
     @classmethod
     def ensure_directories(cls):
