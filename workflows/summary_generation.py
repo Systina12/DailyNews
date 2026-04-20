@@ -4,6 +4,7 @@
 import re
 from datetime import datetime
 
+from config import settings
 from llms.build_prompt import build_headline_prompt
 from llms.llms import LLMClient
 from utils.link_processor import process_summary_links
@@ -121,7 +122,7 @@ def run_summary_generation_pipeline(risk_annotated_data):
 
     llm_client = LLMClient()
 
-    # ---------- 低风险（DeepSeek 主，触发过滤才 fallback Gemini）----------
+    # ---------- 低风险（Grok-only 或 DeepSeek 主 + fallback Gemini）----------
     low_risk_summary = ""
     low_meta = {"model_used": None, "is_fallback": False, "filter_reason": None}
     low_refs = []
@@ -138,13 +139,27 @@ def run_summary_generation_pipeline(risk_annotated_data):
         low_prompt_data = build_headline_prompt(low_block, risk_filter="low")
         low_refs = low_prompt_data.get("refs", [])
 
-        logger.info("生成低风险摘要（DeepSeek 主 + fallback）...")
-        resp = llm_client.request_with_fallback(
-            prompt=low_prompt_data["prompt"],
-            primary="deepseek",
-            temperature=0.3,
-            max_tokens=4000,
-        )
+        if settings.GROK_ONLY:
+            logger.info("生成栏目摘要（Grok-only）...")
+            content = llm_client.request_grok(
+                prompt=low_prompt_data["prompt"],
+                temperature=0.3,
+                max_tokens=4000,
+            )
+            resp = {
+                "content": content,
+                "model_used": "grok",
+                "is_fallback": False,
+                "filter_reason": None,
+            }
+        else:
+            logger.info("生成低风险摘要（DeepSeek 主 + fallback）...")
+            resp = llm_client.request_with_fallback(
+                prompt=low_prompt_data["prompt"],
+                primary="deepseek",
+                temperature=0.3,
+                max_tokens=4000,
+            )
 
         low_risk_summary = resp.get("content", "") or ""
         low_meta = {
@@ -156,12 +171,24 @@ def run_summary_generation_pipeline(risk_annotated_data):
         if _looks_non_chinese(low_risk_summary):
             logger.warning("低风险摘要检测到外文占比过高，追加中文强约束后重试一次")
             retry_prompt = _strengthen_chinese_requirement(low_prompt_data["prompt"])
-            retry_resp = llm_client.request_with_fallback(
-                prompt=retry_prompt,
-                primary="deepseek",
-                temperature=0.2,
-                max_tokens=4000,
-            )
+            if settings.GROK_ONLY:
+                retry_resp = {
+                    "content": llm_client.request_grok(
+                        prompt=retry_prompt,
+                        temperature=0.2,
+                        max_tokens=4000,
+                    ),
+                    "model_used": "grok",
+                    "is_fallback": False,
+                    "filter_reason": None,
+                }
+            else:
+                retry_resp = llm_client.request_with_fallback(
+                    prompt=retry_prompt,
+                    primary="deepseek",
+                    temperature=0.2,
+                    max_tokens=4000,
+                )
             low_risk_summary = retry_resp.get("content", "") or low_risk_summary
             low_meta = {
                 "model_used": retry_resp.get("model_used"),

@@ -11,6 +11,40 @@ logger = get_logger("news_pipeline")
 
 DEFAULT_CATEGORIES = ["头条", "国际财经", "中国财经", "科技", "战争", "国际"]
 
+FRESHRSS_REGION_LABELS = {
+    "中国": "user/-/label/中国",
+}
+
+
+def _has_freshrss_label(item, label: str) -> bool:
+    """判断新闻是否带有指定的 FreshRSS 标签。"""
+    categories = item.get("categories") or []
+    return label in categories
+
+
+def _select_items_for_category(raw_items, category: str):
+    """
+    按栏目挑选候选新闻源，避免先天污染。
+
+    当前约定：
+    - 中国财经：只消费 FreshRSS「中国」分类
+    - 国际财经：显式排除 FreshRSS「中国」分类
+    - 其他栏目：继续使用全量候选，由内容分类决定
+    """
+    china_label = FRESHRSS_REGION_LABELS["中国"]
+
+    if category == "中国财经":
+        selected = [item for item in raw_items if _has_freshrss_label(item, china_label)]
+        logger.info(f"[中国财经] 候选源过滤：中国标签 {len(selected)}/{len(raw_items)} 条")
+        return selected
+
+    if category == "国际财经":
+        selected = [item for item in raw_items if not _has_freshrss_label(item, china_label)]
+        logger.info(f"[国际财经] 候选源过滤：排除中国标签后 {len(selected)}/{len(raw_items)} 条")
+        return selected
+
+    return raw_items
+
 
 def _load_learned_blacklist():
     """
@@ -758,7 +792,8 @@ def run_news_pipeline_all(categories=None, hours: float = 24):
     # 第一轮：处理所有分类
     for cat in categories:
         classifier = Classify(category=cat)
-        block = classifier._process_headlines(raw_items)
+        candidate_items = _select_items_for_category(raw_items, cat)
+        block = classifier._process_headlines(candidate_items)
         
         # 特殊处理头条
         if cat == "头条":
