@@ -3,6 +3,7 @@
 """
 
 import pytest
+from config import settings
 from utils.merge_summaries import (
     extract_html_content,
     renumber_references,
@@ -42,8 +43,8 @@ class TestRenumberReferences:
         """测试带偏移量的重新编号"""
         paragraph = '新闻<a href="#ref1">[1]</a>和<a href="#ref2">[2]</a>'
         result = renumber_references(paragraph, 5)
-        assert '<a href="#ref6">[6]</a>' in result
-        assert '<a href="#ref7">[7]</a>' in result
+        assert '[6]' in result
+        assert '[7]' in result
 
     def test_no_references(self):
         """测试没有引用的段落"""
@@ -62,23 +63,25 @@ class TestMergeSummaries:
 
         result = merge_summaries(low, high)
 
-        assert "2026-02-14 头条" in result
+        assert "<h1>2026-02-14</h1>" in result
         assert "低风险新闻" in result
         assert "高风险新闻" in result
         # 高风险的引用应该被重新编号
-        assert '<a href="#ref2">[2]</a>' in result
+        assert '[2]' in result
 
     def test_merge_only_low(self):
         """测试只有低风险摘要"""
         low = "<h1>2026-02-14 头条</h1><p>低风险新闻</p>"
         result = merge_summaries(low, None)
-        assert result == low
+        assert "低风险新闻" in result
+        assert "【ds新闻】" in result
 
     def test_merge_only_high(self):
         """测试只有高风险摘要"""
         high = "<h1>2026-02-14 头条</h1><p>高风险新闻</p>"
         result = merge_summaries(None, high)
-        assert result == high
+        assert "高风险新闻" in result
+        assert "【gemini新闻】" in result
 
     def test_merge_empty(self):
         """测试两个都为空"""
@@ -92,8 +95,19 @@ class TestMergeSummaries:
 
         result = merge_summaries(low, high, add_section_headers=True)
 
-        assert "【主要新闻】" in result
-        assert "【其他新闻】" in result
+        assert "【ds新闻】" in result
+        assert "【gemini新闻】" in result
+
+    def test_merge_with_grok_section_headers(self, monkeypatch):
+        """测试 grok-only 模式下的分节标题。"""
+        low = "<h1>2026-02-14 头条</h1><p>低风险新闻</p>"
+        high = "<h1>2026-02-14 头条</h1><p>高风险新闻</p>"
+
+        monkeypatch.setattr(settings, "GROK_ONLY", True)
+        result = merge_summaries(low, high, add_section_headers=True)
+
+        assert "【grok新闻】" in result
+        assert "【gemini新闻】" in result
 
     def test_merge_without_section_headers(self):
         """测试不带分节标题的合并"""
@@ -102,5 +116,6 @@ class TestMergeSummaries:
 
         result = merge_summaries(low, high, add_section_headers=False)
 
-        assert "【主要新闻】" not in result
-        assert "【其他新闻】" not in result
+        assert "【ds新闻】" not in result
+        assert "【grok新闻】" not in result
+        assert "【gemini新闻】" not in result

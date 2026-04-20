@@ -83,3 +83,14 @@ def test_classify_politics_falls_back_to_international():
 
     assert category == "国际"
     assert confidence <= 0.6
+
+
+def test_sports_content_is_hard_excluded_from_headlines():
+    classifier = Classify(category="头条")
+    item = _make_item(
+        "Marathon relay runners win city championship",
+        "Athletes celebrated after the final race in the local sports league.",
+        source="BBC Sport",
+    )
+
+    assert classifier._is_hard_excluded(item) is True

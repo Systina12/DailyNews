@@ -95,7 +95,10 @@ class Classify:
             "sneak peek", "preview", "episode", "season",
             # 体育
             "super bowl", "nfl", "olympic", "world cup", "beat ", "wins ", "defeats ",
-            "athlete", "curling", "skating",
+            "athlete", "curling", "skating", "football", "soccer", "basketball", "baseball",
+            "tennis", "golf", "cricket", "marathon", "relay", "racing", "formula 1", "grand prix",
+            "championship", "playoff", "league", "赛季", "足球", "篮球", "网球", "高尔夫", "板球",
+            "马拉松", "接力", "赛车", "大奖赛", "锦标赛", "联赛", "季后赛", "田径",
             # 娱乐
             "music", "singer", "band", "album", "song", "eagles", "henley",
             # 展览/宠物
@@ -105,6 +108,9 @@ class Classify:
             "the takeout", "weekend news", "almanac", "passage:",
         ]
         if any(kw in full_text for kw in hard_exclude):
+            return True
+
+        if any(token in src for token in ["sport", "sports", "espn", "fox sports", "sky sports"]):
             return True
 
         # CBS视频和文字稿
@@ -126,6 +132,9 @@ class Classify:
         soft_keywords = [
             "video", "interview", "transcript", "nature", "art", "museum", "culture",
             "review", "book", "film", "celebrity", "entertainment",
+            "football", "soccer", "basketball", "baseball", "tennis", "golf", "marathon",
+            "relay", "racing", "grand prix", "championship", "league", "sports",
+            "足球", "篮球", "网球", "高尔夫", "马拉松", "接力", "赛车", "大奖赛", "锦标赛", "联赛", "体育",
         ]
         if any(kw in title for kw in soft_keywords):
             return True

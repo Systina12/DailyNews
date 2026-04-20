@@ -4,9 +4,21 @@
 """
 import re
 from typing import Optional, Dict, Any
+from config import settings
 from utils.logger import get_logger
 
 logger = get_logger("merge_summaries")
+
+
+def _get_section_titles() -> tuple[str, str]:
+    """
+    复用现有分节机制，只动态切换展示文案：
+    - GROK_ONLY: grok新闻
+    - 混合模式: ds新闻 / gemini新闻
+    """
+    if settings.GROK_ONLY:
+        return "【grok新闻】", "【gemini新闻】"
+    return "【ds新闻】", "【gemini新闻】"
 
 
 def extract_html_content(html: str) -> Dict[str, Any]:
@@ -143,6 +155,7 @@ def _build_styled_html(
     from datetime import datetime
     
     html_parts = []
+    low_section_title, high_section_title = _get_section_titles()
     
     # HTML头部和样式
     html_parts.append("""<!DOCTYPE html>
@@ -250,14 +263,14 @@ def _build_styled_html(
     # 低风险新闻段落
     if low_paragraphs:
         if add_section_headers:
-            html_parts.append("        <h2>【ds新闻】</h2>\n")
+            html_parts.append(f"        <h2>{low_section_title}</h2>\n")
         for p in low_paragraphs:
             html_parts.append(f"        <p>{p}</p>\n")
     
     # 高风险新闻段落
     if high_paragraphs:
         if add_section_headers:
-            html_parts.append("        <h2>【gemini新闻】</h2>\n")
+            html_parts.append(f"        <h2>{high_section_title}</h2>\n")
         for p in high_paragraphs:
             html_parts.append(f"        <p>{p}</p>\n")
     
