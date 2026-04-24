@@ -281,6 +281,14 @@ def run_realtime_workflow(
         cache_manager.save_news_items(items, category, scores)
         total_processed += len(items)
 
+        # 归档：评分 → 缓存 → 归档 → 吹哨
+        if settings.ARCHIVE_ENABLED:
+            try:
+                from utils.archiver import archive_batch
+                archive_batch(items_with_scores, category, threshold=threshold)
+            except Exception as e:
+                logger.warning(f"[{category}] 归档失败（不阻断流程）: {e}")
+
         for item, score in items_with_scores:
             if score >= threshold:
                 item_id = cache_manager._generate_item_id(item)

@@ -147,7 +147,12 @@ class Settings:
     # 实时缓存配置
     REALTIME_CACHE_DIR = DATA_DIR / "realtime_cache"
     CACHE_RETENTION_HOURS = int(os.getenv("CACHE_RETENTION_HOURS", "24"))  # 缓存保留小时数
-    
+
+    # 新闻归档配置（在 realtime_workflow 链条中：评分 → 缓存 → 归档 → 吹哨）
+    ARCHIVE_ENABLED = os.getenv("ARCHIVE_ENABLED", "true").lower() == "true"
+    ARCHIVE_THRESHOLD = int(os.getenv("ARCHIVE_THRESHOLD", str(ALERT_THRESHOLD)))  # 默认复用 ALERT_THRESHOLD
+    ARCHIVE_DIR = DATA_DIR / "archive"
+
     # 批量处理优化配置
     # Gemini 2.5 Flash Lite支持1M tokens上下文窗口，可以处理更大批次
     # 风险评估prompt更简单，可以增加批次大小
@@ -166,9 +171,10 @@ class Settings:
     @classmethod
     def ensure_directories(cls):
         """确保必要的目录存在"""
-        cls.DATA_DIR.mkdir(exist_ok=True)
-        cls.LOGS_DIR.mkdir(exist_ok=True)
-        cls.REALTIME_CACHE_DIR.mkdir(exist_ok=True)  # 新增：缓存目录
+        cls.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        cls.LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        cls.REALTIME_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cls.ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def validate(cls):
