@@ -12,7 +12,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 from config import settings
 from utils.logger import get_logger
@@ -98,6 +98,7 @@ def _serialize_entry(item: Dict, score: int, category: str) -> Dict:
 
 
 def _archive_path(news_id: str, date_str: str) -> Path:
+    """news_id：新闻唯一标识；date_str：YYYY-MM-DD 格式日期字符串。"""
     p = settings.ARCHIVE_DIR / date_str[:4] / date_str[5:7] / date_str[8:10] / "important"
     p.mkdir(parents=True, exist_ok=True)
     return p / f"{news_id}.json"
@@ -135,9 +136,10 @@ def archive_batch(
     """
     批量归档：只归档 score >= threshold 的条目。
     在 realtime_workflow 中调用。
+    默认阈值使用 settings.ARCHIVE_THRESHOLD。
     """
     if threshold is None:
-        threshold = settings.ALERT_THRESHOLD
+        threshold = settings.ARCHIVE_THRESHOLD
     archived = 0
     for item, score in items_with_scores:
         if score < threshold:

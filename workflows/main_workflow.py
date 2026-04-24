@@ -285,7 +285,7 @@ def run_realtime_workflow(
         if settings.ARCHIVE_ENABLED:
             try:
                 from utils.archiver import archive_batch
-                archive_batch(items_with_scores, category, threshold=threshold)
+                archive_batch(items_with_scores, category)
             except Exception as e:
                 logger.warning(f"[{category}] 归档失败（不阻断流程）: {e}")
 
