@@ -21,10 +21,12 @@ logger = get_logger("archiver")
 
 
 def _item_id(item: Dict) -> str:
-    """与 CacheManager 保持一致：优先 RSS id，否则 title|published。"""
+    """与 CacheManager 保持一致：优先 RSS id，否则 title|published。
+    RSS id 可能包含冒号等特殊字符，需要 hash 处理才能用作文件名。
+    """
     rss_id = item.get("id") or item.get("guid") or ""
     if rss_id:
-        return f"rss_{rss_id}"
+        return "rss_" + hashlib.md5(rss_id.encode()).hexdigest()[:16]
     title = item.get("title", "")
     published = str(item.get("published", ""))
     return "hash_" + hashlib.md5(f"{title}|{published}".encode()).hexdigest()
